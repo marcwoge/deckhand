@@ -1,0 +1,28 @@
+# Keeps dependencies and workflow actions current without generating noise.
+#
+# Monthly and grouped on purpose: this project has one Go dependency and five
+# actions, so weekly checks would mostly produce empty runs, and every pull
+# request costs a CI run.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      go-dependencies:
+        patterns: ["*"]
+    commit-message:
+      prefix: "deps"
+
+  # Actions run with access to the release workflow's write permissions, so
+  # keeping them current matters more than the Go dependency does.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      workflow-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"

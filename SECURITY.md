@@ -59,6 +59,36 @@ If that trade is not one you want, leave `commands` off and use the channel for 
 * Keep `shared/` mode 0600 for secrets, and back it up separately.
 * Watch the audit log (`deckhand history`), or forward notifications to a channel you actually read.
 
+## How this repository is protected
+
+Deckhand is a deployment tool, so a compromised release would run on other
+people's servers. The project is set up accordingly:
+
+* **Releases are signed.** The checksum file is signed with cosign in keyless
+  mode and every binary carries build provenance, so a tampered download can be
+  detected. The verification commands are in every release's notes.
+* **Workflows have minimal permissions.** CI declares `contents: read` and uses
+  no secrets, so a pull request from a fork cannot reach anything. Only the
+  release workflow has write access, and it runs on version tags, which only a
+  maintainer can push.
+* **`pull_request`, never `pull_request_target`.** Fork code never runs with
+  access to repository secrets.
+* **Dependencies are watched.** Dependabot tracks the Go module and the
+  workflow actions monthly.
+* **Secret scanning with push protection** is enabled, and the history has been
+  checked: no credential has ever been committed.
+
+If you are hardening a fork of this project, consider pinning the workflow
+actions to commit SHAs rather than tags. A tag can be moved; a SHA cannot.
+
+## No warranty
+
+Deckhand is provided under the Apache License 2.0, which disclaims all warranty
+(section 7) and limits liability (section 8). It fetches code and runs commands
+on your machines because you told it to. Read [docs/en/security.md](docs/en/security.md)
+before pointing it at anything you care about, and test a watch against a
+staging target first.
+
 ## Supported versions
 
 Deckhand is pre-1.0. Security fixes are made on the latest released version.

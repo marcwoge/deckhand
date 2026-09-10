@@ -1,0 +1,9 @@
+# Every pull request asks @marcwoge for review.
+* @marcwoge
+
+# These decide what runs on contributors' machines and what the release
+# workflow is allowed to do. Changes here deserve a closer look than the rest.
+/.github/workflows/  @marcwoge
+/internal/runner/    @marcwoge
+/internal/deploy/    @marcwoge
+/SECURITY.md         @marcwoge
