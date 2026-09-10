@@ -216,14 +216,20 @@ func extractTar(r io.Reader, destDir string, overwrite bool) (int, error) {
 		}
 		switch hdr.Typeflag {
 		case tar.TypeDir:
+			if err := checkTargetInsideRoot(root, target); err != nil {
+				return count, err
+			}
 			if err := os.MkdirAll(target, 0o755); err != nil {
 				return count, err
 			}
 		case tar.TypeReg:
+			if err := checkTargetInsideRoot(root, filepath.Dir(target)); err != nil {
+				return count, err
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return count, err
 			}
-			if err := checkNoSymlinkParent(root, target); err != nil {
+			if err := checkTargetInsideRoot(root, target); err != nil {
 				return count, err
 			}
 			mode := os.FileMode(hdr.Mode).Perm()
@@ -258,7 +264,13 @@ func extractTar(r io.Reader, destDir string, overwrite bool) (int, error) {
 				return count, fmt.Errorf("refusing symlink %q -> %q: points outside the release directory",
 					hdr.Name, linkTarget)
 			}
+			if err := checkTargetInsideRoot(root, filepath.Dir(target)); err != nil {
+				return count, err
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return count, err
+			}
+			if err := checkTargetInsideRoot(root, target); err != nil {
 				return count, err
 			}
 			if overwrite {
@@ -273,7 +285,16 @@ func extractTar(r io.Reader, destDir string, overwrite bool) (int, error) {
 			if err != nil {
 				return count, err
 			}
+			if err := checkTargetInsideRoot(root, source); err != nil {
+				return count, err
+			}
+			if err := checkTargetInsideRoot(root, filepath.Dir(target)); err != nil {
+				return count, err
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return count, err
+			}
+			if err := checkTargetInsideRoot(root, target); err != nil {
 				return count, err
 			}
 			if overwrite {
@@ -314,20 +335,43 @@ func within(root, path string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
 
-// checkNoSymlinkParent makes sure no directory between root and target is a
-// symlink, which would otherwise let an archive write through it.
-func checkNoSymlinkParent(root, target string) error {
-	dir := filepath.Dir(target)
-	for within(root, dir) && dir != root {
-		info, err := os.Lstat(dir)
-		if err == nil && info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("refusing to write through symlinked directory %q", dir)
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
+// checkTargetInsideRoot makes sure that writing to target really lands inside
+// root, following any symlinks that already exist along the way.
+//
+// safeJoin alone is not enough: it works on the path as written in the archive,
+// while this resolves what is actually on disk. With the in-place strategy the
+// target directory is not empty, so an operator's own symlink - or one from an
+// earlier revision - could otherwise be used to write through and land
+// somewhere else entirely.
+func checkTargetInsideRoot(root, target string) error {
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		realRoot = root
+	}
+	// Find the longest part of the path that already exists; anything beyond
+	// it cannot redirect the write.
+	existing := target
+	for {
+		if _, err := os.Lstat(existing); err == nil {
 			break
 		}
-		dir = parent
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			return nil
+		}
+		existing = parent
+	}
+	resolved, err := filepath.EvalSymlinks(existing)
+	if err != nil {
+		// A dangling symlink resolves to nothing; refuse rather than guess.
+		if info, lerr := os.Lstat(existing); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to write through dangling symlink %q", existing)
+		}
+		return nil
+	}
+	if !within(realRoot, resolved) {
+		return fmt.Errorf("refusing to write outside the release directory: %q leads to %q",
+			target, resolved)
 	}
 	return nil
 }

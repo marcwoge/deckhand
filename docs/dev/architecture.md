@@ -98,7 +98,7 @@ If you change any of these, say so explicitly in the pull request:
 | `runner.buildEnv` | Deploy commands get an allow-list environment; the token is not in it |
 | `runner.Run` | argv execution without a shell; process-group kill on timeout |
 | `deploy.gitFlags` | Hooks and exotic transports disabled for every git call |
-| `deploy.extractTar` | No path traversal, no tar-slip, no device nodes |
+| `deploy.extractTar` | No path traversal, no tar-slip, no device nodes; every entry type is checked against what its path resolves to on disk |
 | `deploy.gitEnv` | The token reaches git via the environment, not the command line |
 | `config.checkPermissions` | Refuses a writable config |
 | `config.ResolveToken` | Refuses a world-readable token file |

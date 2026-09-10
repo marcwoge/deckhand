@@ -134,3 +134,87 @@ func TestExtractOverwriteMode(t *testing.T) {
 		t.Error("overwrite mode must replace the file")
 	}
 }
+
+// With the in-place strategy the target directory is not empty, so a symlink
+// the operator (or an earlier revision) put there must not become a way to
+// write outside the tree. Directories, symlinks and hard links were previously
+// only checked as paths, not as what they resolve to on disk.
+func TestExtractRefusesDirectoryThroughSymlink(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(dir, "data")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	data := tarball(t, &tar.Header{Name: "data/created", Typeflag: tar.TypeDir, Mode: 0o755})
+
+	if _, err := extractTar(bytes.NewReader(data), dir, true); err == nil {
+		t.Fatal("creating a directory through a symlink must be refused")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "created")); err == nil {
+		t.Fatal("a directory was created outside the release directory")
+	}
+}
+
+func TestExtractRefusesSymlinkThroughSymlink(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(dir, "data")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	data := tarball(t, &tar.Header{Name: "data/link", Typeflag: tar.TypeSymlink, Linkname: "target"})
+
+	if _, err := extractTar(bytes.NewReader(data), dir, true); err == nil {
+		t.Fatal("creating a symlink through a symlink must be refused")
+	}
+	if _, err := os.Lstat(filepath.Join(outside, "link")); err == nil {
+		t.Fatal("a symlink was created outside the release directory")
+	}
+}
+
+func TestExtractRefusesHardLinkThroughSymlink(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "source.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "data")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	data := tarball(t, &tar.Header{Name: "data/hard", Typeflag: tar.TypeLink, Linkname: "source.txt"})
+
+	if _, err := extractTar(bytes.NewReader(data), dir, true); err == nil {
+		t.Fatal("creating a hard link through a symlink must be refused")
+	}
+}
+
+// A symlink pointing nowhere must not be silently treated as a safe path.
+func TestExtractRefusesDanglingSymlinkParent(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Symlink(filepath.Join(dir, "does-not-exist"), filepath.Join(dir, "broken")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	data := tarball(t, &tar.Header{Name: "broken/file.txt", Typeflag: tar.TypeReg, Mode: 0o644})
+
+	if _, err := extractTar(bytes.NewReader(data), dir, true); err == nil {
+		t.Fatal("writing through a dangling symlink must be refused")
+	}
+}
+
+// A symlink that stays inside the tree is legitimate and must keep working.
+func TestExtractAllowsSymlinkInsideTree(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "real"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(dir, "real"), filepath.Join(dir, "alias")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	data := tarball(t, &tar.Header{Name: "alias/file.txt", Typeflag: tar.TypeReg, Mode: 0o644})
+
+	if _, err := extractTar(bytes.NewReader(data), dir, true); err != nil {
+		t.Fatalf("a symlink that stays inside the tree must be allowed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "real", "file.txt")); err != nil {
+		t.Errorf("the file did not land in the linked directory: %v", err)
+	}
+}
