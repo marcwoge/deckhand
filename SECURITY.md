@@ -78,8 +78,9 @@ people's servers. The project is set up accordingly:
 * **Secret scanning with push protection** is enabled, and the history has been
   checked: no credential has ever been committed.
 
-If you are hardening a fork of this project, consider pinning the workflow
-actions to commit SHAs rather than tags. A tag can be moved; a SHA cannot.
+* **Workflow actions are pinned to commit SHAs**, not tags, with the version in
+  a trailing comment. A tag can be moved by whoever controls the action's
+  repository; a SHA cannot. Dependabot still updates them.
 
 ## No warranty
 

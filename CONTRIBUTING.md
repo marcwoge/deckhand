@@ -70,6 +70,19 @@ for you.
 
 Architecture notes are in [docs/dev/architecture.md](docs/dev/architecture.md).
 
+## Workflow changes
+
+Actions in `.github/workflows/` are pinned to commit SHAs with the version in a
+trailing comment:
+
+```yaml
+- uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+```
+
+Please keep it that way when you add one. A tag can be moved by whoever controls
+the action's repository, and the release workflow runs with write permissions.
+Dependabot updates pinned SHAs perfectly well.
+
 ## Commits and pull requests
 
 Write commit subjects in the imperative mood (`add calendar blackout windows`),
