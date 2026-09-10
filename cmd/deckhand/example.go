@@ -22,10 +22,38 @@ github:
   # token_file: /etc/deckhand/token   # alternative, must be chmod 600
 
 # Optional. Remove this block if you do not want notifications.
+#
 # notify:
-#   on: [failure, rollback]           # add "success" if you want the good news too
-#   webhook: https://ntfy.sh/your-private-topic
-#   format: ntfy                      # json (default) | slack | ntfy
+#   on: [failure, rollback, halt]     # add "success" if you want the good news too
+#   channels:
+#
+#     # Push to your phone. On the public ntfy.sh a topic is readable by anyone
+#     # who guesses the name, so use a long random one - or host ntfy yourself
+#     # and set a token, as shown here.
+#     - type: ntfy
+#       url: https://ntfy.example.com/deploy
+#       token_env: DECKHAND_NTFY_TOKEN
+#       priority:                     # min | low | default | high | urgent
+#         success: low
+#         halt: urgent
+#
+#     # Telegram doubles as a remote control: send /status, /deploy or
+#     # /rollback to the bot. Commands are only accepted from this chat_id.
+#     - type: telegram
+#       token_env: DECKHAND_TELEGRAM_TOKEN
+#       chat_id: "123456789"
+#       commands: true
+#
+#     # Also works: type: slack (incoming webhook) and type: webhook (full
+#     # JSON event to your own endpoint).
+
+# Tells an outside service that deckhand is alive. Without it, a crashed
+# worker produces no alert at all - silence looks exactly like success.
+# Works with healthchecks.io and with a self-hosted Uptime Kuma push monitor.
+#
+# heartbeat:
+#   url: https://hc-ping.com/your-uuid-here
+#   interval: 5m
 
 watch:
   # ---------------------------------------------------------------------

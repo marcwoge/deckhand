@@ -125,3 +125,99 @@ func TestTokenResolution(t *testing.T) {
 		t.Fatal("a token file readable by others must be refused")
 	}
 }
+
+func TestShortNotifyFormBecomesAChannel(t *testing.T) {
+	body := minimal + `
+notify:
+  on: [failure]
+  webhook: https://ntfy.sh/my-topic
+  format: ntfy
+`
+	cfg, err := Load(write(t, body))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(cfg.Notify.Channels) != 1 {
+		t.Fatalf("got %d channels, want 1", len(cfg.Notify.Channels))
+	}
+	ch := cfg.Notify.Channels[0]
+	if ch.Type != "ntfy" || ch.URL != "https://ntfy.sh/my-topic" {
+		t.Errorf("channel = %+v", ch)
+	}
+}
+
+func TestNotifyChannelValidation(t *testing.T) {
+	cases := map[string]string{
+		"telegram without chat_id": "\nnotify:\n  channels:\n    - type: telegram\n      token: abc\n",
+		"telegram without token":   "\nnotify:\n  channels:\n    - type: telegram\n      chat_id: \"1\"\n",
+		"unknown type":             "\nnotify:\n  channels:\n    - type: carrier-pigeon\n      url: https://x\n",
+		"missing url":              "\nnotify:\n  channels:\n    - type: ntfy\n",
+		"url without scheme":       "\nnotify:\n  channels:\n    - type: ntfy\n      url: ntfy.sh/topic\n",
+		"bad priority":             "\nnotify:\n  channels:\n    - type: ntfy\n      url: https://x\n      priority:\n        failure: screaming\n",
+		"two command bots":         "\nnotify:\n  channels:\n    - type: telegram\n      token: a\n      chat_id: \"1\"\n      commands: true\n    - type: telegram\n      token: b\n      chat_id: \"2\"\n      commands: true\n",
+	}
+	for name, extra := range cases {
+		if _, err := Load(write(t, minimal+extra)); err == nil {
+			t.Errorf("%s should have been rejected", name)
+		}
+	}
+}
+
+func TestValidTelegramChannel(t *testing.T) {
+	body := minimal + `
+notify:
+  on: [failure, halt]
+  channels:
+    - type: telegram
+      token: 12345:abcdef
+      chat_id: "987654"
+      commands: true
+    - type: ntfy
+      url: https://ntfy.example.com/deploy
+      on: [all]
+`
+	cfg, err := Load(write(t, body))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	cmd := cfg.Notify.CommandChannel()
+	if cmd == nil || cmd.ChatID != "987654" {
+		t.Fatalf("command channel = %+v", cmd)
+	}
+	// A channel with its own "on" overrides the global list.
+	if got := cfg.Notify.Channels[1].Events(cfg.Notify.On); len(got) != 1 || got[0] != "all" {
+		t.Errorf("per-channel events = %v", got)
+	}
+	if got := cmd.Events(cfg.Notify.On); len(got) != 2 {
+		t.Errorf("channel without its own list should inherit, got %v", got)
+	}
+}
+
+func TestHeartbeatValidation(t *testing.T) {
+	cfg, err := Load(write(t, minimal+"\nheartbeat:\n  url: https://hc-ping.com/uuid\n"))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.Heartbeat.Enabled() {
+		t.Fatal("heartbeat should be enabled")
+	}
+	if cfg.Heartbeat.Method != "GET" || cfg.Heartbeat.Interval == 0 {
+		t.Errorf("defaults not applied: %+v", cfg.Heartbeat)
+	}
+
+	for name, body := range map[string]string{
+		"no scheme":    "\nheartbeat:\n  url: hc-ping.com/uuid\n",
+		"too frequent": "\nheartbeat:\n  url: https://x/y\n  interval: 5s\n",
+		"bad method":   "\nheartbeat:\n  url: https://x/y\n  method: DELETE\n",
+	} {
+		if _, err := Load(write(t, minimal+body)); err == nil {
+			t.Errorf("%s should have been rejected", name)
+		}
+	}
+
+	// Without a url the whole block stays inert.
+	cfg, err = Load(write(t, minimal))
+	if err != nil || cfg.Heartbeat.Enabled() {
+		t.Error("no heartbeat configured means no pings")
+	}
+}

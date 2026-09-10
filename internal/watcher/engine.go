@@ -16,6 +16,7 @@ import (
 	"github.com/marcwoge/deckhand/internal/config"
 	"github.com/marcwoge/deckhand/internal/deploy"
 	"github.com/marcwoge/deckhand/internal/gh"
+	"github.com/marcwoge/deckhand/internal/heartbeat"
 	"github.com/marcwoge/deckhand/internal/notify"
 )
 
@@ -65,19 +66,26 @@ func New(cfg *config.Config, o Options) (*Engine, error) {
 		return nil, fmt.Errorf("audit log: %w", err)
 	}
 	host, _ := os.Hostname()
-	return &Engine{
+	notifier, notifyErr := notify.New(cfg.Notify)
+	e := &Engine{
 		cfg:      cfg,
 		client:   gh.New(cfg.GitHub.API, token),
 		anon:     gh.New(cfg.GitHub.API, ""),
 		audit:    al,
-		notifier: notify.New(cfg.Notify),
+		notifier: notifier,
 		binary:   o.Binary,
 		token:    token,
 		stateDir: stateDir,
 		host:     host,
 		logf:     logf,
 		locks:    map[string]*sync.Mutex{},
-	}, nil
+	}
+	if notifyErr != nil {
+		// A broken notification channel is worth complaining about loudly, but
+		// it must never stop deployments from running.
+		logf("notify", "warning: %v", notifyErr)
+	}
+	return e, nil
 }
 
 // DefaultStateDir picks a per-user or system-wide location for state and logs.
@@ -164,10 +172,29 @@ func (e *Engine) Resume() error {
 	return err
 }
 
-// Run starts one goroutine per enabled watch and blocks until ctx is done.
+// Run starts one goroutine per enabled watch, plus the heartbeat and the
+// Telegram command listener, and blocks until ctx is done.
 func (e *Engine) Run(ctx context.Context) error {
 	enabled := 0
 	var wg sync.WaitGroup
+
+	if p := heartbeat.New(e.cfg.Heartbeat, e.host, func(f string, a ...interface{}) {
+		e.logf("heartbeat", f, a...)
+	}); p != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p.Run(ctx)
+		}()
+	}
+	if e.cfg.Notify.CommandChannel() != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			e.runCommandBot(ctx)
+		}()
+	}
+
 	for _, w := range e.cfg.Watches {
 		if !w.IsEnabled() {
 			e.logf(w.Name, "disabled in config, skipping")

@@ -189,6 +189,7 @@ func cmdCheck(args []string) error {
 	fmt.Printf("  state directory: %s\n", eng.StateDir())
 	fmt.Printf("  audit log:       %s\n", eng.AuditPath())
 	fmt.Printf("  github token:    %s\n", yesNo(eng.Authenticated()))
+	printNotifications(cfg)
 	for _, w := range eng.Watches() {
 		fmt.Printf("\n  %s\n", w.Name)
 		fmt.Printf("    repository: %s (auth: %s)\n", w.Repo, w.Auth)
@@ -203,6 +204,51 @@ func cmdCheck(args []string) error {
 		}
 	}
 	return nil
+}
+
+// printNotifications summarises where alerts will go, because a channel that
+// silently does nothing is worse than no channel at all.
+func printNotifications(cfg *config.Config) {
+	if len(cfg.Notify.Channels) == 0 {
+		fmt.Printf("  notifications:   none configured\n")
+	}
+	for _, ch := range cfg.Notify.Channels {
+		target := ch.URL
+		if ch.Type == "telegram" {
+			target = "chat " + ch.ChatID
+			if ch.Commands {
+				target += ", commands enabled"
+			}
+		}
+		token, _ := ch.ResolveToken()
+		auth := ""
+		if token != "" {
+			auth = ", authenticated"
+		}
+		fmt.Printf("  notifications:   %s -> %s (on: %s%s)\n", ch.Type, target,
+			strings.Join(ch.Events(cfg.Notify.On), ", "), auth)
+		if ch.Type == "ntfy" && token == "" && strings.Contains(ch.URL, "ntfy.sh") {
+			fmt.Printf("    warning:       this ntfy.sh topic is public - anyone who guesses\n")
+			fmt.Printf("                   the name can read your deployments and post to it\n")
+		}
+	}
+	if cfg.Heartbeat.Enabled() {
+		fmt.Printf("  heartbeat:       every %s to %s\n", cfg.Heartbeat.Interval, hostOf(cfg.Heartbeat.URL))
+	} else {
+		fmt.Printf("  heartbeat:       none - an outage of deckhand itself would go unnoticed\n")
+	}
+}
+
+// hostOf keeps the secret path of a ping url out of the output.
+func hostOf(raw string) string {
+	rest := raw
+	for _, scheme := range []string{"https://", "http://"} {
+		rest = strings.TrimPrefix(rest, scheme)
+	}
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		return rest[:i] + "/…"
+	}
+	return rest
 }
 
 // warnings surfaces configurations that are legal but worth a second look.

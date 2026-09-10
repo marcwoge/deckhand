@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -50,7 +51,7 @@ func (e *Engine) Status() ([]Status, error) {
 }
 
 // PrintStatus renders the status table.
-func (e *Engine) PrintStatus(w *os.File, asJSON bool) error {
+func (e *Engine) PrintStatus(w io.Writer, asJSON bool) error {
 	sts, err := e.Status()
 	if err != nil {
 		return err
@@ -124,7 +125,7 @@ func humanAgo(t time.Time) string {
 }
 
 // PrintHistory replays the audit log, newest last.
-func (e *Engine) PrintHistory(out *os.File, watch string, limit int) error {
+func (e *Engine) PrintHistory(out io.Writer, watch string, limit int) error {
 	f, err := os.Open(e.audit.Path())
 	if os.IsNotExist(err) {
 		fmt.Fprintln(out, "no history yet")

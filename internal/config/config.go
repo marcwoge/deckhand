@@ -23,11 +23,12 @@ const (
 
 // Config is the whole deckhand.yaml file.
 type Config struct {
-	Version  int      `yaml:"version"`
-	Defaults Defaults `yaml:"defaults"`
-	GitHub   GitHub   `yaml:"github"`
-	Notify   Notify   `yaml:"notify"`
-	Watches  []*Watch `yaml:"watch"`
+	Version   int       `yaml:"version"`
+	Defaults  Defaults  `yaml:"defaults"`
+	GitHub    GitHub    `yaml:"github"`
+	Notify    Notify    `yaml:"notify"`
+	Heartbeat Heartbeat `yaml:"heartbeat"`
+	Watches   []*Watch  `yaml:"watch"`
 
 	// Path is the file this config was read from (not part of the YAML).
 	Path string `yaml:"-"`
@@ -56,10 +57,51 @@ type GitHub struct {
 }
 
 // Notify configures outbound notifications.
+//
+// A single unauthenticated destination can be written in the short form
+// (webhook + format). Anything else - several destinations, a token, Telegram -
+// uses the channels list.
 type Notify struct {
-	On      []string `yaml:"on"` // success, failure, rollback, skip
-	Webhook string   `yaml:"webhook"`
-	Format  string   `yaml:"format"` // json (default), slack, ntfy
+	On []string `yaml:"on"` // success, failure, rollback, halt
+
+	// Short form for one destination.
+	Webhook string `yaml:"webhook"`
+	Format  string `yaml:"format"` // json (default), slack, ntfy
+
+	Channels []*Channel `yaml:"channels"`
+}
+
+// Channel is one notification destination.
+type Channel struct {
+	Type string `yaml:"type"` // ntfy | slack | webhook | telegram
+	URL  string `yaml:"url"`
+
+	// Credentials. Prefer token_env or token_file over an inline token.
+	Token     string `yaml:"token"`
+	TokenEnv  string `yaml:"token_env"`
+	TokenFile string `yaml:"token_file"`
+
+	// Telegram only.
+	ChatID   string `yaml:"chat_id"`
+	Commands bool   `yaml:"commands"`
+
+	// On overrides notify.on for this channel, so you can send everything to
+	// one place and only failures to another.
+	On []string `yaml:"on"`
+
+	// Priority maps an event to an ntfy priority (min, low, default, high,
+	// urgent). Unset events use a sensible default.
+	Priority map[string]string `yaml:"priority"`
+}
+
+// Heartbeat pings a dead-man's-switch service so an outage of deckhand itself
+// is noticed. Silence from a crashed worker otherwise looks exactly like
+// silence from a healthy one.
+type Heartbeat struct {
+	URL      string   `yaml:"url"`
+	Interval Duration `yaml:"interval"`
+	Method   string   `yaml:"method"`
+	Timeout  Duration `yaml:"timeout"`
 }
 
 // Watch is a single repository being observed.
@@ -261,7 +303,13 @@ func (c *Config) normalise() error {
 		c.Notify.Format = "json"
 	}
 	if len(c.Notify.On) == 0 {
-		c.Notify.On = []string{"failure", "rollback"}
+		c.Notify.On = []string{"failure", "rollback", "halt"}
+	}
+	if err := c.Notify.normalise(); err != nil {
+		return fmt.Errorf("notify: %w", err)
+	}
+	if err := c.Heartbeat.normalise(); err != nil {
+		return fmt.Errorf("heartbeat: %w", err)
 	}
 	if len(c.Watches) == 0 {
 		return fmt.Errorf("no watch entries configured")
@@ -383,6 +431,127 @@ func (w *Watch) normalise(c *Config) error {
 	return nil
 }
 
+func (n *Notify) normalise() error {
+	// The short form becomes an ordinary channel, so everything downstream
+	// only ever deals with the list.
+	if n.Webhook != "" {
+		n.Channels = append([]*Channel{{
+			Type: n.Format,
+			URL:  n.Webhook,
+		}}, n.Channels...)
+		n.Webhook = ""
+	}
+	seenCommands := false
+	for i, ch := range n.Channels {
+		if ch.Type == "" {
+			return fmt.Errorf("channel #%d has no type (ntfy, slack, webhook or telegram)", i+1)
+		}
+		switch ch.Type {
+		case "ntfy", "slack", "webhook", "json":
+			if ch.Type == "json" {
+				ch.Type = "webhook"
+			}
+			if ch.URL == "" {
+				return fmt.Errorf("channel #%d (%s) needs a url", i+1, ch.Type)
+			}
+			if !strings.HasPrefix(ch.URL, "http://") && !strings.HasPrefix(ch.URL, "https://") {
+				return fmt.Errorf("channel #%d: url must start with http:// or https://", i+1)
+			}
+			if ch.ChatID != "" || ch.Commands {
+				return fmt.Errorf("channel #%d: chat_id and commands only apply to telegram", i+1)
+			}
+		case "telegram":
+			if ch.ChatID == "" {
+				return fmt.Errorf("channel #%d (telegram) needs a chat_id; message your "+
+					"bot once, then read it from "+
+					"https://api.telegram.org/bot<TOKEN>/getUpdates", i+1)
+			}
+			if ch.URL != "" {
+				return fmt.Errorf("channel #%d: telegram takes no url", i+1)
+			}
+			if ch.Commands {
+				if seenCommands {
+					return fmt.Errorf("only one telegram channel may enable commands")
+				}
+				seenCommands = true
+			}
+		default:
+			return fmt.Errorf("channel #%d: unknown type %q", i+1, ch.Type)
+		}
+		if _, err := ch.ResolveToken(); err != nil {
+			return fmt.Errorf("channel #%d: %w", i+1, err)
+		}
+		if ch.Type == "telegram" {
+			if tok, _ := ch.ResolveToken(); tok == "" {
+				return fmt.Errorf("channel #%d (telegram) needs a bot token", i+1)
+			}
+		}
+		for event, prio := range ch.Priority {
+			switch prio {
+			case "min", "low", "default", "high", "urgent":
+			default:
+				return fmt.Errorf("channel #%d: priority for %q must be min, low, default, high or urgent",
+					i+1, event)
+			}
+		}
+	}
+	return nil
+}
+
+// CommandChannel returns the telegram channel that accepts commands, if any.
+func (n *Notify) CommandChannel() *Channel {
+	for _, ch := range n.Channels {
+		if ch.Type == "telegram" && ch.Commands {
+			return ch
+		}
+	}
+	return nil
+}
+
+// ResolveToken reads the channel credential from its configured source.
+func (c *Channel) ResolveToken() (string, error) {
+	return resolveSecret(c.Token, c.TokenEnv, c.TokenFile)
+}
+
+// Events returns the event list this channel reacts to, falling back to the
+// global list.
+func (c *Channel) Events(global []string) []string {
+	if len(c.On) > 0 {
+		return c.On
+	}
+	return global
+}
+
+func (h *Heartbeat) normalise() error {
+	if h.URL == "" {
+		return nil
+	}
+	if !strings.HasPrefix(h.URL, "http://") && !strings.HasPrefix(h.URL, "https://") {
+		return fmt.Errorf("url must start with http:// or https://")
+	}
+	if h.Interval == 0 {
+		h.Interval = Duration(5 * time.Minute)
+	}
+	if time.Duration(h.Interval) < 30*time.Second {
+		return fmt.Errorf("interval must be at least 30s")
+	}
+	if h.Timeout == 0 {
+		h.Timeout = Duration(15 * time.Second)
+	}
+	switch strings.ToUpper(h.Method) {
+	case "":
+		h.Method = "GET"
+	case "GET", "POST", "HEAD":
+		h.Method = strings.ToUpper(h.Method)
+	default:
+		return fmt.Errorf("method must be GET, POST or HEAD")
+	}
+	return nil
+}
+
+// Enabled reports whether a heartbeat is configured.
+func (h Heartbeat) Enabled() bool { return h.URL != "" }
+
 // IsEnabled reports whether the watch should be scheduled.
 func (w *Watch) IsEnabled() bool { return w.Enabled == nil || *w.Enabled }
 
@@ -401,28 +570,39 @@ func (w *Watch) StateDir(defaultDir string) string {
 // Token resolves the GitHub token from the configured source. It returns an
 // empty string when no token is configured, which is valid for public repos.
 func (g GitHub) ResolveToken() (string, error) {
-	if g.TokenFile != "" {
-		info, err := os.Stat(g.TokenFile)
+	secret, err := resolveSecret(g.Token, g.TokenEnv, g.TokenFile)
+	if err != nil {
+		return "", err
+	}
+	if secret == "" {
+		return strings.TrimSpace(os.Getenv("DECKHAND_GITHUB_TOKEN")), nil
+	}
+	return secret, nil
+}
+
+// resolveSecret reads a credential from a file, an environment variable or an
+// inline value, in that order of preference. A file that others can read is
+// refused rather than used.
+func resolveSecret(inline, env, file string) (string, error) {
+	if file != "" {
+		info, err := os.Stat(file)
 		if err != nil {
 			return "", fmt.Errorf("token_file: %w", err)
 		}
 		if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
 			return "", fmt.Errorf("token_file %s is readable by others (mode %04o); run: chmod 600 %s",
-				g.TokenFile, info.Mode().Perm(), g.TokenFile)
+				file, info.Mode().Perm(), file)
 		}
-		b, err := os.ReadFile(g.TokenFile)
+		b, err := os.ReadFile(file)
 		if err != nil {
 			return "", fmt.Errorf("token_file: %w", err)
 		}
 		return strings.TrimSpace(string(b)), nil
 	}
-	if g.TokenEnv != "" {
-		return strings.TrimSpace(os.Getenv(g.TokenEnv)), nil
+	if env != "" {
+		return strings.TrimSpace(os.Getenv(env)), nil
 	}
-	if g.Token != "" {
-		return strings.TrimSpace(g.Token), nil
-	}
-	return strings.TrimSpace(os.Getenv("DECKHAND_GITHUB_TOKEN")), nil
+	return strings.TrimSpace(inline), nil
 }
 
 // DefaultConfigPath returns the first sensible location for deckhand.yaml.
