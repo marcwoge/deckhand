@@ -42,11 +42,33 @@ Alles hier lässt sich pro Watch überschreiben.
 | `failure_limit` | `3` | Anzahl aufeinanderfolgender Fehlschläge, nach der ein Watch sich selbst stoppt. |
 | `state_dir` | siehe unten | Wo Zustand, Git-Spiegel und Audit-Log liegen. |
 | `env` | – | Umgebungsvariablen, die jedem Befehl mitgegeben werden. |
+| `audit.max_size` | `10MB` | Ab dieser Größe wird das Audit-Log rotiert. `0` schaltet die Rotation ab. |
+| `audit.keep` | `5` | Wie viele rotierte Logs aufbewahrt werden. `deckhand history` liest alle. |
 
 Das Standard-Zustandsverzeichnis ist `~/.local/state/deckhand` für einen
 normalen Benutzer, `/var/lib/deckhand` für root und
 `%ProgramData%\deckhand\state` unter Windows. `$DECKHAND_STATE_DIR` überschreibt
 es.
+
+## `include`
+
+Eine große Datei aufzuteilen ist optional, hält aber eine Maschine mit vielen
+Deployments überschaubar — und erlaubt es einem Konfigurationswerkzeug, eine
+Datei abzulegen, ohne eine gemeinsame umzuschreiben.
+
+```yaml
+include: deckhand.d      # relativ zur Hauptdatei, oder ein absoluter Pfad
+```
+
+Jede `*.yaml` und `*.yml` in diesem Verzeichnis wird in lexikalischer Reihenfolge
+gelesen (benenne sie also `10-shop.yaml`, `20-api.yaml`) und darf `watch:`-
+Einträge beisteuern — und nur die. `defaults`, `github`, `notify` und
+`heartbeat` bleiben in der Hauptdatei, damit nie die Frage aufkommt, welcher
+Wert gewinnt. Eingebundene Dateien müssen dieselben Rechteprüfungen bestehen,
+und doppelte Watch-Namen werden gemeldet.
+
+Ist `include` nicht gesetzt und liegt neben der Konfiguration ein Verzeichnis
+`<config>.d`, wird es automatisch verwendet.
 
 ## `github`
 
@@ -289,7 +311,15 @@ verify:
   require_signed_commit: false
   allowed_signers: /etc/deckhand/allowed_signers   # SSH-allowed-signers-Format
   pin_sha: ""                                       # nur genau diese Revision deployen
+  allowed_authors:                                  # Autor oder Committer muss passen
+    - maintainer@example.com
+    - release-bot@example.com
 ```
+
+`allowed_authors` vergleicht die Autor- und Committer-Adressen des Commits, ohne
+Rücksicht auf Groß- und Kleinschreibung. Beachte: Eine Autorenzeile ist
+Metadaten, die jeder setzen kann — sie schützt vor Versehen, nicht vor einem
+Angreifer. Dafür brauchst du eine Signatur.
 
 ### Zeit und Sicherheit
 

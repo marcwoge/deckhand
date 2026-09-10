@@ -109,9 +109,11 @@ export DECKHAND_GITHUB_TOKEN=github_pat_...
 **4. Check and run**
 
 ```bash
-deckhand check      # validates the config and points out risky settings
+deckhand check        # validates the config and points out risky settings
+deckhand doctor       # talks to GitHub: is the token right, does the trigger resolve,
+                      # is the path writable? Read-only and safe on production.
 deckhand deploy shop  # deploy once, right now, to see it work
-deckhand run        # start the worker in the foreground
+deckhand run          # start the worker in the foreground
 ```
 
 **5. Install as a service**
@@ -136,6 +138,8 @@ That is it. From here on, tagging a release is the deployment.
 | `deckhand pause "database migration"` | Hold every deployment |
 | `deckhand resume` / `deckhand resume <watch>` | Release the hold / clear a halted watch |
 | `deckhand check` | Validate the configuration before restarting the service |
+| `deckhand doctor` | Check connectivity, credentials, permissions and whether each trigger resolves |
+| `systemctl reload deckhand` | Apply configuration changes without stopping deployments |
 
 After three consecutive failures a watch halts itself instead of looping, tells you why, and waits for `deckhand resume <watch>`.
 

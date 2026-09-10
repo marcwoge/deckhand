@@ -4,9 +4,14 @@ Fang hier an:
 
 ```bash
 deckhand check      # ist die Konfiguration in Ordnung?
+deckhand doctor     # erreicht er GitHub, stimmt der Token, ist der Pfad beschreibbar?
 deckhand status     # was hält jeder Watch für seinen Zustand?
 deckhand history    # was ist tatsächlich passiert, und wann?
 ```
+
+`deckhand doctor` beantwortet die meisten der folgenden Fragen von selbst. Er
+liest nur, ist auch produktiv gefahrlos und endet mit einem Fehlercode, wenn er
+etwas findet — er eignet sich also auch für ein Überwachungsskript.
 
 ---
 
@@ -145,6 +150,15 @@ Bei ntfy testest du den Endpunkt von Hand:
 ```bash
 curl -H "Authorization: Bearer $DECKHAND_NTFY_TOKEN" -d "test" https://ntfy.example.com/deploy
 ```
+
+### „another deckhand is deploying …"
+
+Zwei Prozesse zeigen auf denselben Watch — meist der Dienst plus ein von Hand
+gestartetes `deckhand deploy`. Warte, bis der erste fertig ist. Nennt die
+Meldung einen Prozess, den es nicht mehr gibt, räumt Deckhand die Sperre beim
+nächsten Versuch selbst weg; eine Sperre von einer *anderen Maschine* wird nie
+automatisch entfernt, weil sich nicht feststellen lässt, ob dort noch gearbeitet
+wird.
 
 ### Es passiert überhaupt nichts
 

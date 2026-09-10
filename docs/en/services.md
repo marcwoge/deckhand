@@ -50,8 +50,16 @@ Everyday commands:
 ```bash
 systemctl status deckhand          # add --user for a user install
 journalctl -u deckhand -f
-sudo systemctl restart deckhand    # after editing the config
+sudo systemctl reload deckhand     # apply config changes without stopping
+sudo systemctl restart deckhand    # full restart
 ```
+
+`reload` sends SIGHUP. Deckhand re-reads the configuration, waits for any
+deployment that is already running, and starts again with the new settings. An
+invalid file is reported and otherwise ignored — the worker keeps running with
+what it had, because stopping deployments over a typo is worse than slightly
+stale settings. Run `deckhand check` first and you will not find out the hard
+way.
 
 ## macOS (launchd)
 
@@ -85,6 +93,9 @@ schtasks /Query /TN Deckhand
 schtasks /End   /TN Deckhand
 schtasks /Run   /TN Deckhand
 ```
+
+Windows has no SIGHUP, so configuration changes need a restart of the task
+(`schtasks /End` then `/Run`) rather than a reload.
 
 Run the installer from an elevated shell for a machine-wide task
 (`--system` runs it as `SYSTEM`).

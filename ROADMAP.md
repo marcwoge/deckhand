@@ -54,7 +54,7 @@ The first release covers the complete loop from trigger to running service.
 | `deckhand check` validates and warns about risky settings | ✅ |
 | Token from environment variable, file or (discouraged) inline | ✅ |
 | GitHub Enterprise Server support (`github.api`, `github.host`) | ✅ |
-| Split configuration across `conf.d/` files | 📋 [#5](https://github.com/marcwoge/deckhand/issues/5) |
+| Split configuration across an include directory | ✅ |
 
 ### Triggers
 | Feature | Status |
@@ -97,7 +97,7 @@ The first release covers the complete loop from trigger to running service.
 | Circuit breaker: a watch halts after N consecutive failures | ✅ |
 | One deployment at a time per watch | ✅ |
 | State survives restarts, upgrades and reboots | ✅ |
-| Lock file so two Deckhand processes cannot fight over one path | 📋 [#2](https://github.com/marcwoge/deckhand/issues/2) |
+| Lock file so two Deckhand processes cannot fight over one path | ✅ |
 
 ### Time windows
 | Feature | Status |
@@ -106,12 +106,14 @@ The first release covers the complete loop from trigger to running service.
 | Blackout rules that override allow rules | ✅ |
 | Per-watch timezone, defaulting to the global one | ✅ |
 | Trigger coalescing: one deployment with the newest revision | ✅ |
-| Calendar-date blackouts (`2026-12-24..2026-12-27`) | 📋 [#1](https://github.com/marcwoge/deckhand/issues/1) |
+| Calendar-date blackouts, one-off and yearly | ✅ |
 
 ### Operating it
 | Feature | Status |
 |---|---|
 | `status`, `history`, `deploy`, `rollback`, `pause`, `resume` | ✅ |
+| `deckhand doctor`: connectivity, credentials, permissions, resolvable triggers | ✅ |
+| Reload the configuration on SIGHUP without stopping deployments | ✅ |
 | Append-only JSON Lines audit log | ✅ |
 | Service installation for systemd, launchd and Windows Task Scheduler | ✅ |
 | Hardened systemd unit (NoNewPrivileges, ProtectSystem, …) | ✅ |
@@ -121,7 +123,7 @@ The first release covers the complete loop from trigger to running service.
 | Telegram remote control: /status, /history, /deploy, /rollback, /pause | ✅ |
 | Heartbeat to a dead-man's-switch service | ✅ |
 | `--json` output for `status` | ✅ |
-| Audit log rotation | 📋 [#3](https://github.com/marcwoge/deckhand/issues/3) |
+| Audit log rotation, read back across rotations | ✅ |
 | Prometheus metrics on localhost | 💭 |
 
 ### Security
@@ -137,23 +139,27 @@ The first release covers the complete loop from trigger to running service.
 | Archive extraction validates every path (no traversal, no tar-slip) | ✅ |
 | Signature verification for tags and commits (`verify:`) | ✅ |
 | Pin a watch to an exact SHA | ✅ |
-| Allowed-author lists | 📋 [#6](https://github.com/marcwoge/deckhand/issues/6) |
-| Signed Deckhand releases with provenance | 🚧 [#11](https://github.com/marcwoge/deckhand/issues/11) |
+| Allowed-author lists | ✅ |
+| Signed releases (cosign, keyless) with build provenance | ✅ |
 
 ---
 
 ## v0.2 — sharper edges
 
+Complete apart from the two items still marked open.
+
 | Feature | Status |
 |---|---|
-| Calendar-date blackout windows | 📋 [#1](https://github.com/marcwoge/deckhand/issues/1) |
+| Calendar-date blackout windows, one-off and yearly | ✅ |
+| Configuration includes (`include:` / `<config>.d`) | ✅ |
+| Audit log rotation and retention | ✅ |
+| Lock file against concurrent Deckhand instances | ✅ |
+| Allowed-author verification | ✅ |
+| Reload configuration without restarting (SIGHUP) | ✅ |
+| `deckhand doctor` — diagnose token scope, connectivity and permissions | ✅ |
+| Signed releases with build provenance | ✅ |
 | `before:` commands and deploy stages | 📋 |
-| `conf.d/` configuration includes | 📋 [#5](https://github.com/marcwoge/deckhand/issues/5) |
-| Audit log rotation and retention | 📋 [#3](https://github.com/marcwoge/deckhand/issues/3) |
-| Lock file against concurrent Deckhand instances | 📋 [#2](https://github.com/marcwoge/deckhand/issues/2) |
 | Private submodule support | 📋 |
-| Allowed-author verification | 📋 [#6](https://github.com/marcwoge/deckhand/issues/6) |
-| Reload configuration without restarting (SIGHUP) | 📋 [#4](https://github.com/marcwoge/deckhand/issues/4) |
 
 ## v0.3 — platform polish
 
@@ -161,7 +167,7 @@ The first release covers the complete loop from trigger to running service.
 |---|---|
 | Native Windows service (Service Control Manager) instead of a scheduled task | 📋 [#7](https://github.com/marcwoge/deckhand/issues/7) |
 | Packages: `.deb`, `.rpm`, Homebrew formula, Scoop manifest | 📋 [#8](https://github.com/marcwoge/deckhand/issues/8) |
-| `deckhand doctor` — diagnose token scope, connectivity and permissions | 📋 [#9](https://github.com/marcwoge/deckhand/issues/9) |
+| Testing on real macOS and Windows machines | 📋 [#10](https://github.com/marcwoge/deckhand/issues/10) |
 | Prometheus metrics endpoint bound to localhost | 💭 |
 | Optional inbound webhook mode for people who can expose a port | 💭 |
 

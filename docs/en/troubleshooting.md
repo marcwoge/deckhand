@@ -4,9 +4,14 @@ Start here:
 
 ```bash
 deckhand check      # is the configuration sane?
+deckhand doctor     # can it reach GitHub, is the token right, is the path writable?
 deckhand status     # what does each watch think its state is?
 deckhand history    # what actually happened, and when?
 ```
+
+`deckhand doctor` answers most of the questions below on its own. It is
+read-only, safe to run against production, and exits non-zero when it finds a
+problem, so it works from a monitoring script too.
 
 ---
 
@@ -138,6 +143,14 @@ For ntfy, test the endpoint by hand:
 ```bash
 curl -H "Authorization: Bearer $DECKHAND_NTFY_TOKEN" -d "test" https://ntfy.example.com/deploy
 ```
+
+### "another deckhand is deploying …"
+
+Two processes are pointed at the same watch — usually the service plus a
+hand-run `deckhand deploy`. Wait for the first to finish. If the message names a
+process that no longer exists, deckhand clears the lock by itself on the next
+attempt; a lock written by *another machine* is never cleared automatically,
+because there is no way to tell whether that machine is still working.
 
 ### Nothing happens at all
 

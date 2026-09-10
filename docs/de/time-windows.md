@@ -38,6 +38,29 @@ egal, lange Namen erlaubt), als Bereich (`Mon-Fri`), als Liste (`Sat,Sun`) oder
 | `Sun` | Der ganze Sonntag (Zeiten dürfen fehlen) |
 | `22:00-05:00` | Jede Nacht (Tage dürfen fehlen) |
 
+### Kalenderdaten
+
+Eine Regel, die mit einer Ziffer beginnt, wird als Datum gelesen, nicht als
+Wochentag:
+
+| Regel | Bedeutung |
+|---|---|
+| `2026-12-24..2026-12-27` | Diese vier Tage, einmalig |
+| `2026-12-31` | Dieser eine Tag |
+| `12-24..12-26` | Dieselben Tage **jedes Jahr** |
+| `12-27..01-02` | Ein jährlicher Bereich über den Jahreswechsel |
+| `2026-12-31 18:00-23:59` | Ein Datum mit Zeitspanne |
+
+Am nützlichsten sind sie als Sperrzeiten:
+
+```yaml
+window:
+  allow: ["Mon-Fri 22:00-05:00"]
+  blackout:
+    - "12-24..12-26"          # jedes Weihnachten
+    - "2026-11-27"            # ein bestimmter Release-Stopp
+```
+
 ### Fenster über Mitternacht
 
 `Mon-Fri 22:00-05:00` gehört zu dem Tag, an dem es **beginnt**. Mittwoch 23:00

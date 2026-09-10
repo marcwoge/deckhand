@@ -110,6 +110,8 @@ export DECKHAND_GITHUB_TOKEN=github_pat_...
 
 ```bash
 deckhand check        # prüft die Konfiguration und weist auf riskante Einstellungen hin
+deckhand doctor       # fragt GitHub: stimmt der Token, löst der Trigger auf,
+                      # ist der Pfad beschreibbar? Nur lesend, auch produktiv gefahrlos.
 deckhand deploy shop  # einmal sofort deployen, um zu sehen, dass es läuft
 deckhand run          # Worker im Vordergrund starten
 ```
@@ -136,6 +138,8 @@ Fertig. Ab jetzt ist das Taggen eines Releases das Deployment.
 | `deckhand pause "Datenbankmigration"` | Alle Deployments anhalten |
 | `deckhand resume` / `deckhand resume <watch>` | Anhalten aufheben / gestoppten Watch freigeben |
 | `deckhand check` | Konfiguration prüfen, bevor der Dienst neu gestartet wird |
+| `deckhand doctor` | Erreichbarkeit, Zugangsdaten, Rechte und ob jeder Trigger auflösbar ist |
+| `systemctl reload deckhand` | Konfigurationsänderungen übernehmen, ohne Deployments zu stoppen |
 
 Nach drei aufeinanderfolgenden Fehlschlägen stoppt sich ein Watch selbst, statt in einer Schleife zu kreisen, nennt den Grund und wartet auf `deckhand resume <watch>`.
 

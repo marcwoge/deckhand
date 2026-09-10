@@ -51,8 +51,16 @@ Befehle für den Alltag:
 ```bash
 systemctl status deckhand          # bei Benutzerinstallation mit --user
 journalctl -u deckhand -f
-sudo systemctl restart deckhand    # nach dem Ändern der Konfiguration
+sudo systemctl reload deckhand     # Konfiguration übernehmen, ohne zu stoppen
+sudo systemctl restart deckhand    # vollständiger Neustart
 ```
+
+`reload` sendet SIGHUP. Deckhand liest die Konfiguration neu, wartet auf ein
+gerade laufendes Deployment und startet mit den neuen Einstellungen wieder. Eine
+ungültige Datei wird gemeldet und ansonsten ignoriert — der Worker läuft mit dem
+weiter, was er hatte, denn Deployments wegen eines Tippfehlers zu stoppen ist
+schlimmer als leicht veraltete Einstellungen. Führe vorher `deckhand check` aus,
+dann erfährst du es nicht auf die harte Tour.
 
 ## macOS (launchd)
 
@@ -87,6 +95,9 @@ schtasks /Query /TN Deckhand
 schtasks /End   /TN Deckhand
 schtasks /Run   /TN Deckhand
 ```
+
+Windows kennt kein SIGHUP; Konfigurationsänderungen brauchen dort einen Neustart
+der Aufgabe (`schtasks /End`, dann `/Run`) statt eines Reloads.
 
 Für eine maschinenweite Aufgabe führe den Installer in einer Shell mit erhöhten
 Rechten aus (`--system` lässt sie als `SYSTEM` laufen).

@@ -42,10 +42,31 @@ Everything here can be overridden per watch.
 | `failure_limit` | `3` | Consecutive failures after which a watch halts itself. |
 | `state_dir` | see below | Where state, the git mirror and the audit log live. |
 | `env` | – | Environment variables added to every command. |
+| `audit.max_size` | `10MB` | Rotate the audit log past this size. `0` disables rotation. |
+| `audit.keep` | `5` | How many rotated logs to keep. `deckhand history` reads them all. |
 
 The default state directory is `~/.local/state/deckhand` for a normal user,
 `/var/lib/deckhand` for root, and `%ProgramData%\deckhand\state` on Windows.
 `$DECKHAND_STATE_DIR` overrides it.
+
+## `include`
+
+Splitting one large file into several is optional but keeps a machine with many
+deployments manageable, and lets configuration management drop in a file
+without rewriting a shared one.
+
+```yaml
+include: deckhand.d      # relative to the main file, or an absolute path
+```
+
+Every `*.yaml` and `*.yml` in that directory is read in lexical order (so name
+them `10-shop.yaml`, `20-api.yaml`) and may contribute `watch:` entries — and
+only those. `defaults`, `github`, `notify` and `heartbeat` stay in the main
+file, so there is never a question about which value wins. Included files must
+pass the same permission checks, and duplicate watch names are reported.
+
+If `include` is not set and a directory named `<config>.d` exists next to the
+config, it is used automatically.
 
 ## `github`
 
@@ -284,7 +305,15 @@ verify:
   require_signed_commit: false
   allowed_signers: /etc/deckhand/allowed_signers   # SSH allowed-signers format
   pin_sha: ""                                       # deploy only this revision
+  allowed_authors:                                  # author or committer must match
+    - maintainer@example.com
+    - release-bot@example.com
 ```
+
+`allowed_authors` compares the commit's author and committer addresses,
+case-insensitively. Be aware that an author line is metadata anyone can set: it
+guards against accidents, not against an attacker. For that, require a
+signature.
 
 ### Timing and safety
 

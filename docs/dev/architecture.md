@@ -102,9 +102,20 @@ If you change any of these, say so explicitly in the pull request:
 | `deploy.gitEnv` | The token reaches git via the environment, not the command line |
 | `config.checkPermissions` | Refuses a writable config |
 | `config.ResolveToken` | Refuses a world-readable token file |
+| `config.loadIncludes` | Included files get the same permission check as the main one |
+| `deploy.AcquireLock` | Two processes never deploy the same path at once |
 | `main.warnings` | Warns when a command lives inside the deployed tree |
 | `watcher.handleUpdate` | Telegram commands are accepted only from the configured chat, and only when recent |
 | `notify.post` | Credentials go in an Authorization header, never in a URL, and never into an error message |
+
+## Reload
+
+`Engine.Reload` stops the current generation of goroutines and starts a new one
+from a freshly loaded config. Replacing everything is simpler and less
+error-prone than diffing watch by watch, and it is cheap because all state
+lives on disk. Stopping takes each watch lock first, so a deployment that is
+already running finishes rather than being killed half way through. An invalid
+file leaves the running generation untouched.
 
 ## Testing
 

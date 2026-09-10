@@ -37,6 +37,28 @@ every day.
 | `Sun` | All of Sunday (times may be omitted) |
 | `22:00-05:00` | Every night (days may be omitted) |
 
+### Calendar dates
+
+A rule that starts with a digit is read as a date rather than a weekday:
+
+| Rule | Meaning |
+|---|---|
+| `2026-12-24..2026-12-27` | Those four days, once |
+| `2026-12-31` | That single day |
+| `12-24..12-26` | The same days **every year** |
+| `12-27..01-02` | A yearly range across new year |
+| `2026-12-31 18:00-23:59` | A date plus a time range |
+
+These are most useful as blackouts:
+
+```yaml
+window:
+  allow: ["Mon-Fri 22:00-05:00"]
+  blackout:
+    - "12-24..12-26"          # every Christmas
+    - "2026-11-27"            # one specific release freeze
+```
+
 ### Windows that cross midnight
 
 `Mon-Fri 22:00-05:00` belongs to the day it **starts** on. Wednesday 23:00 is
