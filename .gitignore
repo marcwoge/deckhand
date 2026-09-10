@@ -1,0 +1,14 @@
+# Build output
+/deckhand
+/deckhand.exe
+/dist/
+
+# Local configuration and state - never commit these
+deckhand.yaml
+deckhand.yml
+*.token
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
