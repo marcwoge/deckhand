@@ -39,6 +39,8 @@ Das ist die komplette Einrichtung. Neues Release auf GitHub → der Code landet 
 | **Automatischer Rollback** | Ein fehlgeschlagener Befehl oder Health-Check stellt das vorherige Release wieder her und führt den Befehl erneut aus — es kommt also der Dienst zurück, nicht nur die Dateien. |
 | **Zeitfenster** | „Nur zwischen 22:00 und 05:00, und nie Freitagnachmittag." Trigger außerhalb des Fensters werden zusammengefasst: Du bekommst ein Deployment mit dem neuesten Code, nicht zwölf. |
 | **Eine Binärdatei, drei Plattformen** | Linux, macOS, Windows. Keine Laufzeitumgebung, kein Interpreter, keine Abhängigkeiten. `deckhand service install` registriert ihn bei systemd, launchd oder der Windows-Aufgabenplanung. |
+| **Meldungen — und eine Fernbedienung** | Push aufs Handy per ntfy, Slack oder Webhook — oder ein Telegram-Bot, den du `/status` fragen und `/rollback shop` befehlen kannst; abgefragt wie GitHub, also weiterhin ohne eingehenden Port. |
+| **Merkt den eigenen Tod** | Ein Herzschlag an healthchecks.io oder Uptime Kuma — denn ein abgestürzter Worker sendet keine Meldungen, und Stille sieht genauso aus wie Erfolg. |
 | **Alles wird protokolliert** | Ein fortlaufendes Audit-Log im JSON-Lines-Format über jeden Trigger, jede Revision, jeden Befehl und jeden Exit-Code. |
 
 ---
@@ -85,6 +87,15 @@ watch:
     health:
       http: http://localhost:8080/healthz
       retries: 10
+
+notify:
+  on: [failure, rollback, halt]
+  channels:
+    - type: ntfy                    # Push aufs Handy
+      url: https://ntfy.sh/deckhand-a7f3k9m2q8
+
+heartbeat:                          # damit du merkst, wenn Deckhand selbst stirbt
+  url: https://hc-ping.com/deine-uuid
 ```
 
 **3. Token erstellen**
@@ -153,7 +164,7 @@ Dein Befehl läuft in `current` und erhält `DECKHAND_SHA`, `DECKHAND_REF`, `DEC
 * **Logs:** `journalctl -u deckhand -f` (Linux), `~/Library/Logs/deckhand.log` (macOS), `deckhand history` auf jeder Plattform.
 * **Backups:** Sichere `shared/` — dort liegen deine Konfiguration und deine Daten. Alles andere lässt sich jederzeit wieder von GitHub holen.
 
-Vollständige Dokumentation: **[docs/de/](docs/de/)** — [Konfiguration](docs/de/configuration.md) · [Trigger](docs/de/triggers.md) · [Zeitfenster](docs/de/time-windows.md) · [Sicherheit](docs/de/security.md) · [Als Dienst betreiben](docs/de/services.md) · [Fehlersuche](docs/de/troubleshooting.md)
+Vollständige Dokumentation: **[docs/de/](docs/de/)** — [Konfiguration](docs/de/configuration.md) · [Trigger](docs/de/triggers.md) · [Zeitfenster](docs/de/time-windows.md) · [Benachrichtigungen](docs/de/notifications.md) · [Sicherheit](docs/de/security.md) · [Als Dienst betreiben](docs/de/services.md) · [Fehlersuche](docs/de/troubleshooting.md)
 
 ---
 

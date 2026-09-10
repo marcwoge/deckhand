@@ -25,6 +25,11 @@ opens; if none is configured, it deploys immediately. A health check decides
 whether the deployment counts as successful, and a failed deployment is rolled
 back automatically.
 
+It reports what it did over the channels you configure — push to a phone, a
+team chat, your own endpoint — and a Telegram bot doubles as a remote control
+you can ask for status or tell to roll back. A heartbeat to an outside service
+makes sure that even the worker's own death is noticed.
+
 It does all of this without opening a single inbound port, without needing more
 than read access to the repositories, and without ever letting repository
 content decide what gets executed on the machine.
@@ -110,7 +115,11 @@ The first release covers the complete loop from trigger to running service.
 | Append-only JSON Lines audit log | ✅ |
 | Service installation for systemd, launchd and Windows Task Scheduler | ✅ |
 | Hardened systemd unit (NoNewPrivileges, ProtectSystem, …) | ✅ |
-| Notifications via webhook, Slack or ntfy | ✅ |
+| Notifications via webhook, Slack, ntfy or Telegram | ✅ |
+| Several notification channels, each with its own event filter | ✅ |
+| Authenticated ntfy (bearer token) with per-event priorities | ✅ |
+| Telegram remote control: /status, /history, /deploy, /rollback, /pause | ✅ |
+| Heartbeat to a dead-man's-switch service | ✅ |
 | `--json` output for `status` | ✅ |
 | Audit log rotation | 📋 [#3](https://github.com/marcwoge/deckhand/issues/3) |
 | Prometheus metrics on localhost | 💭 |

@@ -120,6 +120,32 @@ Die Strategie `releases` braucht einen Link für `current`. Aktiviere den
 Entwicklermodus für echte Symlinks, führe den Installer mit erhöhten Rechten
 aus, oder stelle diesen Watch auf `strategy: inplace` um.
 
+### Der Telegram-Bot antwortet nicht
+
+* Hast du dem Bot zuerst geschrieben? Ein Bot kann kein Gespräch beginnen, und
+  bis dahin hat er keinen Chat, in den er antworten könnte.
+* Ist `chat_id` der Chat, aus dem du schreibst? Befehle aus jedem anderen Chat
+  werden absichtlich stillschweigend ignoriert. Die Logzeile
+  `ignored a message from chat N` nennt die ID, aus der du tatsächlich
+  geschrieben hast.
+* Stand beim Start `listening for commands from chat … as @deinbot` im Log?
+  Wenn nicht, wurde der Token abgelehnt — `deckhand check` zeigt den Kanal.
+* Ein Befehl, der `⌛ Ignored: that command is … old` zurückbekommt, lag auf
+  den Telegram-Servern. Sende ihn einfach erneut.
+
+### Benachrichtigungen kommen nie an
+
+Führe `deckhand check` aus: Es listet jeden Kanal auf, wohin er zeigt und ob
+Zugangsdaten gefunden wurden. Sieh dann im Log nach einer Zeile, die mit
+`notify:` beginnt — ein fehlschlagender Kanal wird dort gemeldet und hält das
+Deployment nie auf.
+
+Bei ntfy testest du den Endpunkt von Hand:
+
+```bash
+curl -H "Authorization: Bearer $DECKHAND_NTFY_TOKEN" -d "test" https://ntfy.example.com/deploy
+```
+
 ### Es passiert überhaupt nichts
 
 * Läuft der Worker? `systemctl status deckhand`, `launchctl list | grep deckhand`, `schtasks /Query /TN Deckhand`.

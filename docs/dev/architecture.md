@@ -57,6 +57,21 @@ usefully, every path can be validated before it touches the filesystem. See
 **Rollback re-runs the commands.** Relinking `current` only moves files. The
 service is only actually back when the command that starts it has run again.
 
+## The command bot
+
+`internal/watcher/commands.go` long-polls the Telegram API — the same outbound
+-only shape as the GitHub client, so enabling it opens no port. Three details
+matter and are covered by tests:
+
+* the backlog is skipped at startup and the update offset is persisted, so a
+  restart never replays a command;
+* commands older than `maxCommandAge` are refused, because Telegram keeps
+  undelivered messages for a day;
+* commands from any chat other than the configured one get no reply at all.
+
+`runCommandBotWith` is the loop split out from credential setup so a stub client
+can drive it in tests.
+
 ## State
 
 Per watch, in `<state_dir>/watches/<name>/`:
@@ -68,6 +83,7 @@ Globally, in `<state_dir>/`:
 
 * `audit.jsonl` — the append-only log
 * `paused` — present when deployments are globally held
+* `telegram_offset` — the last handled Telegram update
 
 State is written atomically (temp file plus rename) and is deliberately simple
 to read and repair by hand. A corrupt `state.json` is treated as a fresh start
@@ -87,6 +103,8 @@ If you change any of these, say so explicitly in the pull request:
 | `config.checkPermissions` | Refuses a writable config |
 | `config.ResolveToken` | Refuses a world-readable token file |
 | `main.warnings` | Warns when a command lives inside the deployed tree |
+| `watcher.handleUpdate` | Telegram commands are accepted only from the configured chat, and only when recent |
+| `notify.post` | Credentials go in an Authorization header, never in a URL, and never into an error message |
 
 ## Testing
 

@@ -39,6 +39,8 @@ That is the whole setup. New release appears on GitHub → the code lands on the
 | **Automatic rollback** | A failing command or health check restores the previous release and re-runs the command, so the service comes back — not just the files. |
 | **Deploy windows** | "Only between 22:00 and 05:00, and never on Friday afternoon." Triggers that arrive outside the window are coalesced: you get one deployment with the newest code, not twelve. |
 | **One binary, three platforms** | Linux, macOS, Windows. No runtime, no interpreter, no dependencies. `deckhand service install` registers it with systemd, launchd or the Windows Task Scheduler. |
+| **Alerts, and a remote control** | Push to your phone via ntfy, Slack or a webhook — or a Telegram bot you can ask `/status` and tell `/rollback shop`, polled like GitHub so there is still no inbound port. |
+| **Notices its own death** | A heartbeat to healthchecks.io or Uptime Kuma, because a crashed worker sends no alerts — and silence looks exactly like success. |
 | **Everything is logged** | An append-only JSON Lines audit trail of every trigger, revision, command and exit code. |
 
 ---
@@ -85,6 +87,15 @@ watch:
     health:
       http: http://localhost:8080/healthz
       retries: 10
+
+notify:
+  on: [failure, rollback, halt]
+  channels:
+    - type: ntfy                    # push to your phone
+      url: https://ntfy.sh/deckhand-a7f3k9m2q8
+
+heartbeat:                          # so you notice if deckhand itself dies
+  url: https://hc-ping.com/your-uuid
 ```
 
 **3. Create a token**
@@ -153,7 +164,7 @@ Your command runs in `current`, and gets `DECKHAND_SHA`, `DECKHAND_REF`, `DECKHA
 * **Logs:** `journalctl -u deckhand -f` (Linux), `~/Library/Logs/deckhand.log` (macOS), `deckhand history` on any platform.
 * **Backups:** back up `shared/` — it holds your configuration and data. Everything else can be re-fetched from GitHub.
 
-Full documentation: **[docs/en/](docs/en/)** — [configuration](docs/en/configuration.md) · [triggers](docs/en/triggers.md) · [time windows](docs/en/time-windows.md) · [security](docs/en/security.md) · [running as a service](docs/en/services.md) · [troubleshooting](docs/en/troubleshooting.md)
+Full documentation: **[docs/en/](docs/en/)** — [configuration](docs/en/configuration.md) · [triggers](docs/en/triggers.md) · [time windows](docs/en/time-windows.md) · [notifications](docs/en/notifications.md) · [security](docs/en/security.md) · [running as a service](docs/en/services.md) · [troubleshooting](docs/en/troubleshooting.md)
 
 ---
 

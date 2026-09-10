@@ -24,6 +24,7 @@ version: 1          # Pflicht, derzeit immer 1
 defaults: {}        # gilt für jeden Watch, sofern nicht überschrieben
 github: {}          # API-Zugang
 notify: {}          # optionale Benachrichtigungen
+heartbeat: {}       # optionaler Totmannschalter
 watch: []           # ein Eintrag je beobachtetem Repository
 ```
 
@@ -84,17 +85,71 @@ deshalb automatisch auf fünf Minuten. Ein Token lohnt sich also auch für
 
 ## `notify`
 
-Optional. Lass den Block weg, wenn du keine Benachrichtigungen willst.
+Optional. Lass den Block weg, wenn du keine Benachrichtigungen willst. Alle
+Einzelheiten, auch zur Telegram-Fernbedienung, stehen in
+[notifications.md](notifications.md).
+
+Ein einzelnes Ziel ohne Zugangsdaten lässt sich kurz schreiben:
 
 ```yaml
 notify:
-  on: [failure, rollback]        # success, failure, rollback, halt — oder "all"
+  on: [failure, rollback, halt]  # success, failure, rollback, halt — oder "all"
   webhook: https://ntfy.sh/dein-privates-topic
   format: ntfy                   # json (Standard) | slack | ntfy
 ```
 
-`json` sendet das vollständige Ereignisobjekt, `slack` sendet `{"text": "..."}`
-für einen Incoming Webhook, `ntfy` sendet reinen Text mit Titel-Header.
+Alles andere — mehrere Ziele, ein Token, Telegram — nutzt `channels`:
+
+```yaml
+notify:
+  on: [failure, rollback, halt]
+  channels:
+    - type: telegram
+      token_env: DECKHAND_TELEGRAM_TOKEN
+      chat_id: "123456789"
+      commands: true             # nimmt /status, /deploy, /rollback aus diesem Chat an
+    - type: ntfy
+      url: https://ntfy.example.com/deploy
+      token_env: DECKHAND_NTFY_TOKEN
+      priority:                  # min | low | default | high | urgent
+        success: low
+        halt: urgent
+    - type: webhook
+      url: https://automation.example.com/deckhand
+      on: [all]                  # dieser Kanal überschreibt die globale Liste
+```
+
+| Schlüssel | Gilt für | Bedeutung |
+|---|---|---|
+| `type` | alle | `ntfy`, `slack`, `webhook` oder `telegram`. |
+| `url` | außer telegram | Wohin gesendet wird. Muss http(s) sein. |
+| `token` / `token_env` / `token_file` | alle | Zugangsdaten. Werden als `Authorization: Bearer` gesendet, nie in der URL. Für telegram Pflicht. |
+| `chat_id` | telegram | Welcher Chat Meldungen erhält und Befehle senden darf. |
+| `commands` | telegram | Aktiviert die Fernbedienung. Höchstens ein Kanal. |
+| `on` | alle | Überschreibt die globale Ereignisliste für diesen Kanal. |
+| `priority` | ntfy | ntfy-Priorität je Ereignis. |
+
+Kanäle sind unabhängig: Ein defekter Endpunkt hält weder die anderen auf noch
+beeinflusst er das Deployment.
+
+## `heartbeat`
+
+Optional, aber empfohlen. Jeder Benachrichtigungskanal meldet sich nur, wenn
+etwas schiefgeht — ein abgestürzter Worker oder eine ausgeschaltete Maschine
+erzeugt also gar keine Meldung. Ein Totmannschalter bemerkt die Stille.
+
+```yaml
+heartbeat:
+  url: https://hc-ping.com/deine-uuid
+  interval: 5m        # Standard 5m, Minimum 30s
+  method: GET         # GET (Standard), POST oder HEAD
+  timeout: 15s
+```
+
+Funktioniert mit [healthchecks.io](https://healthchecks.io) und mit einem
+selbst gehosteten [Uptime Kuma](https://uptime.kuma.pet) Push-Monitor. Der
+erste Ping geht beim Start raus. Siehe
+[notifications.md](notifications.md#der-herzschlag--merken-dass-deckhand-selbst-weg-ist).
 
 ## `watch`
 
@@ -263,9 +318,19 @@ github:
   token_env: DECKHAND_GITHUB_TOKEN
 
 notify:
-  on: [failure, rollback]
-  webhook: https://ntfy.sh/deploy-alerts-8f3a
-  format: ntfy
+  on: [failure, rollback, halt]
+  channels:
+    - type: telegram
+      token_env: DECKHAND_TELEGRAM_TOKEN
+      chat_id: "123456789"
+      commands: true
+    - type: ntfy
+      url: https://ntfy.example.com/deploy
+      token_env: DECKHAND_NTFY_TOKEN
+
+heartbeat:
+  url: https://hc-ping.com/deine-uuid
+  interval: 5m
 
 watch:
   - name: shop
