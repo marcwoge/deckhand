@@ -2,6 +2,7 @@ package watcher
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -84,7 +85,7 @@ func TestDoctorIsReadOnlyAboutTheHeartbeat(t *testing.T) {
 	var buf bytes.Buffer
 	r := &report{out: &buf}
 	e.cfg.Heartbeat = config.Heartbeat{URL: "http://127.0.0.1:1/ping", Interval: 0}
-	e.checkNotifications(t.Context(), r)
+	e.checkNotifications(context.Background(), r)
 	if !strings.Contains(buf.String(), "not pinged here") {
 		t.Errorf("output should say the heartbeat is not pinged:\n%s", buf.String())
 	}

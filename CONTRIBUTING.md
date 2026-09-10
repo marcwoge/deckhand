@@ -41,7 +41,16 @@ go test ./...       # must pass
 GOOS=windows go build ./...   # and darwin, and linux/arm64
 ```
 
-Please run all four before opening a pull request. CI runs the same checks, and
+Please run all four before opening a pull request.
+
+**Use the Go version from `go.mod`.** A newer toolchain compiles happily against
+standard-library functions that the declared version does not have, so code that
+builds on your machine can still fail in CI. Pin the toolchain for a check and
+the problem shows up before you push:
+
+```bash
+GOTOOLCHAIN=go1.22.0 go vet ./... && GOTOOLCHAIN=go1.22.0 go test ./...
+``` CI runs the same checks, and
 deliberately only on pushes to `main` and on tags — it is not there to iterate
 for you.
 
