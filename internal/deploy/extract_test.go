@@ -218,3 +218,53 @@ func TestExtractAllowsSymlinkInsideTree(t *testing.T) {
 		t.Errorf("the file did not land in the linked directory: %v", err)
 	}
 }
+
+// safeJoin is the single barrier between an archive entry and the filesystem,
+// so it gets its own table rather than only being covered through extractTar.
+func TestSafeJoinRejectsEscapes(t *testing.T) {
+	root := "/srv/app/releases/abc"
+	bad := []string{
+		"../escape.txt",
+		"../../escape.txt",
+		"a/../../escape.txt",
+		"a/b/../../../escape.txt",
+		"..",
+		"/etc/passwd",
+		`\etc\passwd`,
+		`\\server\share\file`,
+		`a\..\..\escape.txt`,
+		"foo/../../bar",
+		"",
+	}
+	for _, name := range bad {
+		if got, err := safeJoin(root, name); err == nil {
+			t.Errorf("safeJoin(%q) = %q, want an error", name, got)
+		}
+	}
+}
+
+// Names that merely look suspicious must still work, or the tool would reject
+// perfectly ordinary repositories.
+func TestSafeJoinAcceptsLegitimateNames(t *testing.T) {
+	root := "/srv/app/releases/abc"
+	good := map[string]string{
+		"main.go":              "/srv/app/releases/abc/main.go",
+		"cmd/app/main.go":      "/srv/app/releases/abc/cmd/app/main.go",
+		"test..data.txt":       "/srv/app/releases/abc/test..data.txt",
+		"..hidden":             "/srv/app/releases/abc/..hidden",
+		"a..b/c..d.txt":        "/srv/app/releases/abc/a..b/c..d.txt",
+		"./relative.txt":       "/srv/app/releases/abc/relative.txt",
+		"dir/./file.txt":       "/srv/app/releases/abc/dir/file.txt",
+		".github/workflows/ci": "/srv/app/releases/abc/.github/workflows/ci",
+	}
+	for name, want := range good {
+		got, err := safeJoin(root, name)
+		if err != nil {
+			t.Errorf("safeJoin(%q) refused a legitimate name: %v", name, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("safeJoin(%q) = %q, want %q", name, got, want)
+		}
+	}
+}

@@ -312,15 +312,44 @@ func extractTar(r io.Reader, destDir string, overwrite bool) (int, error) {
 	}
 }
 
+// safeJoin turns an archive entry name into a path inside root, refusing
+// anything that could land elsewhere.
+//
+// The checks are deliberately explicit and repetitive rather than delegated to
+// a helper: each one is a separate, obvious barrier, which keeps the guarantee
+// readable and lets static analysis see it too.
 func safeJoin(root, name string) (string, error) {
-	if filepath.IsAbs(name) || strings.HasPrefix(name, "/") || strings.Contains(name, `\..\`) {
+	if name == "" {
+		return "", fmt.Errorf("refusing archive entry with an empty name")
+	}
+	// Absolute in any notation: a unix path, a windows drive letter, a
+	// drive-relative path such as "\\dir", or a UNC path.
+	if filepath.IsAbs(name) || strings.HasPrefix(name, "/") || strings.HasPrefix(name, `\`) {
 		return "", fmt.Errorf("refusing archive entry with absolute path %q", name)
 	}
+
+	// Reject ".." as a path segment, in either separator style. Matching whole
+	// segments rather than the substring ".." keeps legitimate names such as
+	// "test..data.txt" working.
+	for _, sep := range []string{"/", `\`} {
+		for _, segment := range strings.Split(name, sep) {
+			if segment == ".." {
+				return "", fmt.Errorf("refusing archive entry containing \"..\": %q", name)
+			}
+		}
+	}
+
 	clean := filepath.Clean(filepath.FromSlash(name))
 	if clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
 		return "", fmt.Errorf("refusing archive entry escaping the release directory: %q", name)
 	}
+
 	target := filepath.Join(root, clean)
+
+	// Belt and braces: the joined path must still start at root.
+	if target != root && !strings.HasPrefix(target, root+string(os.PathSeparator)) {
+		return "", fmt.Errorf("refusing archive entry outside the release directory: %q", name)
+	}
 	if !within(root, target) {
 		return "", fmt.Errorf("refusing archive entry outside the release directory: %q", name)
 	}
