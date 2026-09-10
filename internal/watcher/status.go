@@ -126,31 +126,38 @@ func humanAgo(t time.Time) string {
 
 // PrintHistory replays the audit log, newest last.
 func (e *Engine) PrintHistory(out io.Writer, watch string, limit int) error {
-	f, err := os.Open(e.audit.Path())
-	if os.IsNotExist(err) {
+	// Rotated files first, so history does not appear to restart after a
+	// rotation.
+	var events []audit.Event
+	for _, path := range e.audit.Files() {
+		f, err := os.Open(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		sc := bufio.NewScanner(f)
+		sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
+		for sc.Scan() {
+			var ev audit.Event
+			if err := json.Unmarshal(sc.Bytes(), &ev); err != nil {
+				continue
+			}
+			if watch != "" && !strings.EqualFold(ev.Watch, watch) {
+				continue
+			}
+			events = append(events, ev)
+		}
+		err = sc.Err()
+		f.Close()
+		if err != nil {
+			return err
+		}
+	}
+	if len(events) == 0 {
 		fmt.Fprintln(out, "no history yet")
 		return nil
-	}
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	var events []audit.Event
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
-	for sc.Scan() {
-		var ev audit.Event
-		if err := json.Unmarshal(sc.Bytes(), &ev); err != nil {
-			continue
-		}
-		if watch != "" && !strings.EqualFold(ev.Watch, watch) {
-			continue
-		}
-		events = append(events, ev)
-	}
-	if err := sc.Err(); err != nil {
-		return err
 	}
 	if limit > 0 && len(events) > limit {
 		events = events[len(events)-limit:]

@@ -14,6 +14,12 @@ defaults:
   strategy: releases        # releases = atomic switch + rollback | inplace
   keep_releases: 5
   failure_limit: 3          # stop a watch after this many failures in a row
+  # audit:
+  #   max_size: 10MB        # rotate the audit log past this size (0 = never)
+  #   keep: 5
+
+# Split the watches below into their own files when this one gets long:
+# include: deckhand.d       # a directory of *.yaml files, each with watch entries
 
 github:
   # Preferred: keep the token out of this file entirely.
@@ -93,7 +99,9 @@ watch:
         - "Mon-Fri 22:00-05:00"
         - "Sat-Sun *"
       # blackout:
-      #   - "Fri 16:00-23:59"
+      #   - "Fri 16:00-23:59"     # weekday plus time
+      #   - "12-24..12-26"        # every Christmas
+      #   - "2026-11-27"          # one specific date
     run:
       - ["systemctl", "--user", "restart", "api-staging"]
 

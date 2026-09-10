@@ -43,6 +43,14 @@ func (e *Engine) deployTarget(ctx context.Context, w *config.Watch, t *gh.Target
 	lock.Lock()
 	defer lock.Unlock()
 
+	// Guards against a second deckhand process - a service and a hand-run
+	// command, say - deploying the same path at the same time.
+	fileLock, err := deploy.AcquireLock(e.watchStateDir(w), w.Name)
+	if err != nil {
+		return err
+	}
+	defer fileLock.Release()
+
 	st, err := e.loadState(w)
 	if err != nil {
 		return err
@@ -203,6 +211,12 @@ func (e *Engine) Rollback(ctx context.Context, w *config.Watch) error {
 	lock := e.lockFor(w.Name)
 	lock.Lock()
 	defer lock.Unlock()
+
+	fileLock, err := deploy.AcquireLock(e.watchStateDir(w), w.Name)
+	if err != nil {
+		return err
+	}
+	defer fileLock.Release()
 
 	st, err := e.loadState(w)
 	if err != nil {

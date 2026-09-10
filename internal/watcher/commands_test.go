@@ -276,3 +276,86 @@ func TestCommandLoopSkipsBacklogAndAnswers(t *testing.T) {
 		t.Errorf("offset = %d, want 102 or more so commands are not replayed", e.loadOffset())
 	}
 }
+
+func TestReloadPicksUpANewWatch(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "deckhand.yaml")
+	body := strings.Replace(testConfig, "%PATH%", filepath.Join(dir, "srv"), 1)
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := New(cfg, Options{StateDir: filepath.Join(dir, "state"),
+		Logf: func(string, string, ...interface{}) {}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := e.start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer e.stop()
+
+	if len(e.Watches()) != 1 {
+		t.Fatalf("expected one watch to begin with, got %d", len(e.Watches()))
+	}
+
+	// Add a second watch and reload.
+	body += `
+  - name: api
+    repo: acme/api
+    trigger:
+      type: branch
+      branch: main
+    path: ` + filepath.Join(dir, "api") + `
+    run:
+      - ["true"]
+`
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Reload(ctx); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if len(e.Watches()) != 2 {
+		t.Fatalf("after reload: %d watches, want 2", len(e.Watches()))
+	}
+	if _, err := e.Watch("api"); err != nil {
+		t.Errorf("the new watch is not known: %v", err)
+	}
+}
+
+// A typo must not take the worker down.
+func TestReloadKeepsRunningConfigOnError(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "deckhand.yaml")
+	body := strings.Replace(testConfig, "%PATH%", filepath.Join(dir, "srv"), 1)
+	_ = os.WriteFile(cfgPath, []byte(body), 0o600)
+	cfg, _ := config.Load(cfgPath)
+	e, err := New(cfg, Options{StateDir: filepath.Join(dir, "state"),
+		Logf: func(string, string, ...interface{}) {}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := e.start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer e.stop()
+
+	_ = os.WriteFile(cfgPath, []byte("version: 1\nthis is not: [valid\n"), 0o600)
+	if err := e.Reload(ctx); err == nil {
+		t.Fatal("an invalid configuration must be reported")
+	} else if !strings.Contains(err.Error(), "keeping the running one") {
+		t.Errorf("error should say the old config is still in use, got %v", err)
+	}
+	if _, err := e.Watch("shop"); err != nil {
+		t.Errorf("the original watch must still be configured: %v", err)
+	}
+}

@@ -87,6 +87,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart={{BINARY}} run --config {{CONFIG}}
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=10
 {{USER}}

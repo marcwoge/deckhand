@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -30,8 +31,14 @@ type Config struct {
 	Heartbeat Heartbeat `yaml:"heartbeat"`
 	Watches   []*Watch  `yaml:"watch"`
 
+	// Include names a directory of additional *.yaml files, each of which may
+	// contribute watch entries. Defaults to "<config>.d" when that exists.
+	Include string `yaml:"include"`
+
 	// Path is the file this config was read from (not part of the YAML).
 	Path string `yaml:"-"`
+	// Sources lists every file that contributed to this config.
+	Sources []string `yaml:"-"`
 }
 
 // Defaults apply to every watch that does not override them.
@@ -44,6 +51,13 @@ type Defaults struct {
 	FailureLimit   int               `yaml:"failure_limit"`
 	StateDir       string            `yaml:"state_dir"`
 	Env            map[string]string `yaml:"env"`
+	Audit          Audit             `yaml:"audit"`
+}
+
+// Audit controls how much history is kept on disk.
+type Audit struct {
+	MaxSize Size `yaml:"max_size"`
+	Keep    int  `yaml:"keep"`
 }
 
 // GitHub holds API access settings. Prefer TokenEnv or TokenFile over Token.
@@ -243,16 +257,85 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg := &Config{Path: abs}
+	cfg := &Config{Path: abs, Sources: []string{abs}}
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
 	dec.KnownFields(true)
 	if err := dec.Decode(cfg); err != nil {
 		return nil, fmt.Errorf("%s: %w", filepath.Base(abs), err)
 	}
+	if err := cfg.loadIncludes(); err != nil {
+		return nil, err
+	}
 	if err := cfg.normalise(); err != nil {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+// includeFile is the subset of the config an included file may set. Defaults,
+// credentials and notifications stay in the main file, so there is never a
+// question about which one wins.
+type includeFile struct {
+	Watches []*Watch `yaml:"watch"`
+}
+
+// loadIncludes reads watch entries from the include directory, in lexical
+// order so the result does not depend on the filesystem.
+func (c *Config) loadIncludes() error {
+	dir := c.Include
+	if dir == "" {
+		// Convention over configuration: deckhand.yaml picks up deckhand.yaml.d
+		// automatically when it is there.
+		candidate := c.Path + ".d"
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			dir = candidate
+		} else {
+			return nil
+		}
+	}
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(filepath.Dir(c.Path), dir)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("include directory %s: %w", dir, err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if ext := strings.ToLower(filepath.Ext(e.Name())); ext != ".yaml" && ext != ".yml" {
+			continue
+		}
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		path := filepath.Join(dir, name)
+		info, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		// Included files decide what runs just as much as the main file does.
+		if err := checkPermissions(path, info); err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		var inc includeFile
+		dec := yaml.NewDecoder(strings.NewReader(string(data)))
+		dec.KnownFields(true)
+		if err := dec.Decode(&inc); err != nil {
+			return fmt.Errorf("%s: %w (included files may only contain watch entries)", name, err)
+		}
+		c.Watches = append(c.Watches, inc.Watches...)
+		c.Sources = append(c.Sources, path)
+	}
+	return nil
 }
 
 // checkPermissions refuses group- or world-writable configs, and warns loudly
@@ -291,6 +374,15 @@ func (c *Config) normalise() error {
 	}
 	if d.FailureLimit == 0 {
 		d.FailureLimit = 3
+	}
+	if d.Audit.MaxSize == 0 {
+		d.Audit.MaxSize = Size(10 << 20)
+	}
+	if d.Audit.Keep == 0 {
+		d.Audit.Keep = 5
+	}
+	if d.Audit.Keep < 0 {
+		return fmt.Errorf("audit.keep cannot be negative")
 	}
 	if c.GitHub.API == "" {
 		c.GitHub.API = "https://api.github.com"

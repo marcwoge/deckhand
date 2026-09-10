@@ -221,3 +221,115 @@ func TestHeartbeatValidation(t *testing.T) {
 		t.Error("no heartbeat configured means no pings")
 	}
 }
+
+func TestSizeParsing(t *testing.T) {
+	cfg, err := Load(write(t, minimal+"\ndefaults:\n  audit:\n    max_size: 25MB\n    keep: 3\n"))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got := cfg.Defaults.Audit.MaxSize.B(0); got != 25<<20 {
+		t.Errorf("max_size = %d, want %d", got, 25<<20)
+	}
+	if cfg.Defaults.Audit.Keep != 3 {
+		t.Errorf("keep = %d", cfg.Defaults.Audit.Keep)
+	}
+
+	// Defaults apply when the block is absent.
+	cfg, _ = Load(write(t, minimal))
+	if cfg.Defaults.Audit.MaxSize.B(0) != 10<<20 || cfg.Defaults.Audit.Keep != 5 {
+		t.Errorf("defaults not applied: %+v", cfg.Defaults.Audit)
+	}
+
+	if _, err := Load(write(t, minimal+"\ndefaults:\n  audit:\n    max_size: enormous\n")); err == nil {
+		t.Error("an unparseable size should be rejected")
+	}
+}
+
+func TestIncludeDirectory(t *testing.T) {
+	dir := t.TempDir()
+	main := filepath.Join(dir, "deckhand.yaml")
+	if err := os.WriteFile(main, []byte(minimal), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	incDir := main + ".d"
+	if err := os.MkdirAll(incDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	extra := `
+watch:
+  - name: api
+    repo: acme/api
+    trigger:
+      type: branch
+      branch: main
+    path: /tmp/deckhand-test-api
+    run:
+      - ["true"]
+`
+	// Lexical order decides, not filesystem order.
+	if err := os.WriteFile(filepath.Join(incDir, "20-api.yaml"), []byte(extra), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(incDir, "notes.txt"), []byte("ignored"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(main)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(cfg.Watches) != 2 {
+		t.Fatalf("got %d watches, want 2 (one from each file)", len(cfg.Watches))
+	}
+	if cfg.Watches[1].Name != "api" {
+		t.Errorf("included watch = %q", cfg.Watches[1].Name)
+	}
+	if len(cfg.Sources) != 2 {
+		t.Errorf("sources = %v, want both files", cfg.Sources)
+	}
+}
+
+func TestIncludedFilesAreCheckedToo(t *testing.T) {
+	dir := t.TempDir()
+	main := filepath.Join(dir, "deckhand.yaml")
+	_ = os.WriteFile(main, []byte(minimal), 0o600)
+	incDir := main + ".d"
+	_ = os.MkdirAll(incDir, 0o750)
+
+	// World-writable: someone else could change what runs on this machine.
+	// (Written first, then chmod'd, because umask would strip the bits.)
+	loose := filepath.Join(incDir, "10-loose.yaml")
+	_ = os.WriteFile(loose, []byte("watch: []\n"), 0o600)
+	if err := os.Chmod(loose, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(main); err == nil || !strings.Contains(err.Error(), "writable") {
+		t.Fatalf("a writable included file must be refused, got %v", err)
+	}
+	_ = os.Chmod(loose, 0o600)
+
+	// Included files may not smuggle in credentials or defaults.
+	_ = os.WriteFile(loose, []byte("github:\n  token: sneaky\n"), 0o600)
+	if _, err := Load(main); err == nil {
+		t.Error("an included file setting github credentials must be refused")
+	}
+}
+
+func TestDuplicateNamesAcrossIncludes(t *testing.T) {
+	dir := t.TempDir()
+	main := filepath.Join(dir, "deckhand.yaml")
+	_ = os.WriteFile(main, []byte(minimal), 0o600)
+	incDir := main + ".d"
+	_ = os.MkdirAll(incDir, 0o750)
+	_ = os.WriteFile(filepath.Join(incDir, "dup.yaml"), []byte(`
+watch:
+  - name: app
+    repo: acme/other
+    trigger: { type: release }
+    path: /tmp/other
+    run: [["true"]]
+`), 0o600)
+	if _, err := Load(main); err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("a name reused in an included file must be reported, got %v", err)
+	}
+}

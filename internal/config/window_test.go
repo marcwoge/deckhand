@@ -129,3 +129,110 @@ func TestInvalidRules(t *testing.T) {
 		}
 	}
 }
+
+func TestCalendarBlackoutRange(t *testing.T) {
+	w := &Window{Allow: []string{"* *"}, Blackout: []string{"2026-12-24..2026-12-27"}, Timezone: "UTC"}
+	if err := w.Compile("UTC"); err != nil {
+		t.Fatal(err)
+	}
+	closed := []string{"2026-12-24 00:00", "2026-12-25 13:00", "2026-12-27 23:30"}
+	for _, when := range closed {
+		if w.OpenAt(at(t, when)) {
+			t.Errorf("%s must be blacked out", when)
+		}
+	}
+	open := []string{"2026-12-23 23:59", "2026-12-28 00:00", "2027-12-25 12:00"}
+	for _, when := range open {
+		if !w.OpenAt(at(t, when)) {
+			t.Errorf("%s must be open (the range names a year)", when)
+		}
+	}
+}
+
+func TestSingleCalendarDate(t *testing.T) {
+	w := &Window{Allow: []string{"* *"}, Blackout: []string{"2026-12-31"}, Timezone: "UTC"}
+	if err := w.Compile("UTC"); err != nil {
+		t.Fatal(err)
+	}
+	if w.OpenAt(at(t, "2026-12-31 09:00")) {
+		t.Error("the named date must be blacked out all day")
+	}
+	if !w.OpenAt(at(t, "2027-01-01 09:00")) {
+		t.Error("the next day must be open again")
+	}
+}
+
+func TestYearlyDateRepeats(t *testing.T) {
+	w := &Window{Allow: []string{"* *"}, Blackout: []string{"12-24..12-26"}, Timezone: "UTC"}
+	if err := w.Compile("UTC"); err != nil {
+		t.Fatal(err)
+	}
+	for _, when := range []string{"2026-12-25 10:00", "2027-12-25 10:00", "2030-12-24 00:00"} {
+		if w.OpenAt(at(t, when)) {
+			t.Errorf("%s must be blacked out every year", when)
+		}
+	}
+	if !w.OpenAt(at(t, "2026-12-27 10:00")) {
+		t.Error("27 December must be open")
+	}
+}
+
+func TestYearlyRangeWrapsNewYear(t *testing.T) {
+	w := &Window{Allow: []string{"* *"}, Blackout: []string{"12-27..01-02"}, Timezone: "UTC"}
+	if err := w.Compile("UTC"); err != nil {
+		t.Fatal(err)
+	}
+	for _, when := range []string{"2026-12-28 10:00", "2027-01-01 10:00", "2027-01-02 23:00"} {
+		if w.OpenAt(at(t, when)) {
+			t.Errorf("%s must be blacked out", when)
+		}
+	}
+	if !w.OpenAt(at(t, "2027-01-03 10:00")) {
+		t.Error("3 January must be open")
+	}
+}
+
+func TestCalendarDateWithTimeRange(t *testing.T) {
+	w := &Window{Allow: []string{"* *"}, Blackout: []string{"2026-12-31 18:00-23:59"}, Timezone: "UTC"}
+	if err := w.Compile("UTC"); err != nil {
+		t.Fatal(err)
+	}
+	if !w.OpenAt(at(t, "2026-12-31 10:00")) {
+		t.Error("the morning must stay open")
+	}
+	if w.OpenAt(at(t, "2026-12-31 19:00")) {
+		t.Error("the evening must be blacked out")
+	}
+}
+
+// A multi-day blackout must not make NextOpen give up and report a wrong time.
+func TestNextOpenSeesPastALongBlackout(t *testing.T) {
+	w := &Window{Allow: []string{"* *"}, Blackout: []string{"2026-12-20..2026-12-31"}, Timezone: "UTC"}
+	if err := w.Compile("UTC"); err != nil {
+		t.Fatal(err)
+	}
+	got := w.NextOpen(at(t, "2026-12-21 10:00"))
+	want := at(t, "2027-01-01 00:00")
+	if got.Before(want) || got.Sub(want) > 15*time.Minute {
+		t.Errorf("NextOpen = %s, want about %s", got, want)
+	}
+}
+
+func TestInvalidDateRules(t *testing.T) {
+	for _, bad := range []string{
+		"2026-13-01", "2026-12-32", "2026-12-27..2026-12-24", "2026-12-24..12-27", "20261224",
+	} {
+		w := &Window{Blackout: []string{bad}}
+		if err := w.Compile("UTC"); err == nil {
+			t.Errorf("rule %q should have been rejected", bad)
+		}
+	}
+}
+
+// Weekday rules must keep working now that dates share the syntax.
+func TestWeekdayRulesStillParse(t *testing.T) {
+	w := mustWindow(t, "Mon-Fri 22:00-05:00")
+	if !w.OpenAt(at(t, "2026-09-09 23:00")) {
+		t.Error("Mon-Fri must not be mistaken for a date")
+	}
+}

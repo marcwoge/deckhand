@@ -28,6 +28,7 @@ const usage = `deckhand - watch GitHub repositories, pull new revisions, run you
 Usage:
   deckhand run [--config FILE]              start the worker (foreground)
   deckhand check [--config FILE]            validate the configuration and exit
+  deckhand doctor [--config FILE]           check connectivity, credentials and permissions
   deckhand status [--json]                  show what every watch is doing
   deckhand deploy <watch> [--force]         deploy now, ignoring the time window
   deckhand rollback <watch>                 go back to the previous revision
@@ -63,6 +64,8 @@ func main() {
 		err = cmdRun(args)
 	case "check":
 		err = cmdCheck(args)
+	case "doctor":
+		err = cmdDoctor(args)
 	case "status":
 		err = cmdStatus(args)
 	case "deploy":
@@ -167,6 +170,7 @@ func cmdRun(args []string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	watchForReload(ctx, eng)
 
 	if err := eng.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return err
@@ -309,6 +313,32 @@ func yesNo(b bool) string {
 		return "yes"
 	}
 	return "no"
+}
+
+func cmdDoctor(args []string) error {
+	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
+	cfgPath := addConfigFlag(fs)
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	eng, cfg, err := newEngine(*cfgPath)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("deckhand %s, config %s\n", version, cfg.Path)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	problems, err := eng.Doctor(ctx, os.Stdout)
+	if err != nil {
+		return err
+	}
+	if problems > 0 {
+		// A non-zero exit makes this usable from a monitoring script.
+		os.Exit(1)
+	}
+	return nil
 }
 
 func cmdStatus(args []string) error {

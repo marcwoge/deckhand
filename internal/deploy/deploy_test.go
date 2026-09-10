@@ -192,3 +192,48 @@ func TestInplaceStrategyKeepsForeignFiles(t *testing.T) {
 		t.Errorf("in-place update did not replace tracked files: %q", body)
 	}
 }
+
+func TestAllowedAuthors(t *testing.T) {
+	source, first, _ := makeRepo(t)
+	root := t.TempDir()
+	w := testWatch(t, source, filepath.Join(root, "srv"))
+	w.Verify.AllowedAuthors = []string{"someone-else@example.com"}
+	d := New(w, filepath.Join(root, "state"), "", "", func(string, ...interface{}) {})
+	ctx := context.Background()
+	if err := d.Fetch(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	target := &gh.Target{SHA: first, Ref: "main", Kind: "branch"}
+	err := d.Verify(ctx, target)
+	if err == nil {
+		t.Fatal("a revision from an author who is not on the list must be refused")
+	}
+	if !strings.Contains(err.Error(), "allowed_authors") {
+		t.Errorf("error should name the setting, got %v", err)
+	}
+
+	// The test repository commits as test@example.com; casing must not matter.
+	w.Verify.AllowedAuthors = []string{"Test@Example.com"}
+	if err := d.Verify(ctx, target); err != nil {
+		t.Errorf("a listed author must be accepted: %v", err)
+	}
+}
+
+func TestPinSHA(t *testing.T) {
+	source, first, second := makeRepo(t)
+	root := t.TempDir()
+	w := testWatch(t, source, filepath.Join(root, "srv"))
+	w.Verify.PinSHA = first
+	d := New(w, filepath.Join(root, "state"), "", "", func(string, ...interface{}) {})
+	ctx := context.Background()
+	if err := d.Fetch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Verify(ctx, &gh.Target{SHA: second, Ref: "main"}); err == nil {
+		t.Error("a pinned watch must refuse a different revision")
+	}
+	if err := d.Verify(ctx, &gh.Target{SHA: first, Ref: "main"}); err != nil {
+		t.Errorf("the pinned revision must be accepted: %v", err)
+	}
+}

@@ -104,6 +104,17 @@ func (d *Deployer) Verify(ctx context.Context, t *gh.Target) error {
 		}
 		d.Logf("signature ok: tag %s", t.Ref)
 	}
+	if len(v.AllowedAuthors) > 0 {
+		author, committer, err := d.git.commitIdentities(ctx, d.mirrorDir(), t.SHA)
+		if err != nil {
+			return fmt.Errorf("allowed_authors: %w", err)
+		}
+		if !anyAllowed(v.AllowedAuthors, author, committer) {
+			return fmt.Errorf("revision %s was authored by %s and committed by %s, "+
+				"neither of which is in allowed_authors", short(t.SHA), author, committer)
+		}
+		d.Logf("author ok: %s", author)
+	}
 	if v.RequireSignedCommit {
 		if err := d.git.verifySignature(ctx, d.mirrorDir(), t.SHA, false, v.AllowedSigners); err != nil {
 			return fmt.Errorf("commit signature check failed: %w", err)
@@ -300,6 +311,22 @@ func (d *Deployer) Prune(keep int, protect ...string) {
 	}
 }
 
+// anyAllowed reports whether the author or committer is on the list. The
+// comparison is case-insensitive because git addresses often are.
+//
+// Worth knowing: an author line is metadata anyone can set. This guards
+// against accident, not against an attacker - for that, require a signature.
+func anyAllowed(allowed []string, identities ...string) bool {
+	for _, want := range allowed {
+		for _, got := range identities {
+			if got != "" && strings.EqualFold(strings.TrimSpace(want), got) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func short(sha string) string {
 	if len(sha) > 8 {
 		return sha[:8]
@@ -309,3 +336,12 @@ func short(sha string) string {
 
 // Short exposes the abbreviated SHA helper.
 func Short(sha string) string { return short(sha) }
+
+// ProbeLink creates and removes a link, so "deckhand doctor" can tell whether
+// the atomic switch will work on this filesystem before a deployment needs it.
+func ProbeLink(linkPath, target string) error {
+	if err := replaceLink(linkPath, target, true); err != nil {
+		return err
+	}
+	return os.Remove(linkPath)
+}

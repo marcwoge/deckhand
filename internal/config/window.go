@@ -18,13 +18,40 @@ type Window struct {
 	blackout []rule
 }
 
-// rule is one parsed "Mon-Fri 22:00-05:00" style entry.
+// rule is one parsed "Mon-Fri 22:00-05:00" style entry. A rule matches either
+// on weekdays or on calendar dates, never both.
 type rule struct {
 	days     [7]bool // index 0 = Sunday, matching time.Weekday
-	startMin int     // minutes since midnight
-	endMin   int     // minutes since midnight; may be <= startMin for wrap-around
+	dates    *dateRange
+	startMin int // minutes since midnight
+	endMin   int // minutes since midnight; may be <= startMin for wrap-around
 	wholeDay bool
 	source   string
+}
+
+// dateRange is a calendar range such as "2026-12-24..2026-12-27". A range
+// without a year repeats every year, which is what people mean by "every
+// Christmas".
+type dateRange struct {
+	fromYear, fromMonth, fromDay int
+	toYear, toMonth, toDay       int
+}
+
+// contains reports whether t falls inside the range, inclusive on both ends.
+func (d dateRange) contains(t time.Time) bool {
+	if d.fromYear > 0 {
+		from := time.Date(d.fromYear, time.Month(d.fromMonth), d.fromDay, 0, 0, 0, 0, t.Location())
+		to := time.Date(d.toYear, time.Month(d.toMonth), d.toDay, 23, 59, 59, int(time.Second-1), t.Location())
+		return !t.Before(from) && !t.After(to)
+	}
+	// Yearly range: compare month and day only, allowing a wrap across new year.
+	cur := int(t.Month())*100 + t.Day()
+	from := d.fromMonth*100 + d.fromDay
+	to := d.toMonth*100 + d.toDay
+	if from <= to {
+		return cur >= from && cur <= to
+	}
+	return cur >= from || cur <= to
 }
 
 var weekdayNames = map[string]time.Weekday{
@@ -78,6 +105,9 @@ func (w *Window) Compile(defaultTZ string) error {
 //	"* 02:00-04:00"         every day
 //	"Sun *"                 whole day
 //	"22:00-05:00"           every day, time range only
+//	"2026-12-24..2026-12-27"  a calendar range, whole days
+//	"2026-12-31 18:00-23:59"  a single date with a time range
+//	"12-24..12-26"          the same dates every year
 func parseRule(s string) (rule, error) {
 	r := rule{source: s}
 	fields := strings.Fields(strings.TrimSpace(s))
@@ -98,7 +128,13 @@ func parseRule(s string) (rule, error) {
 		return r, fmt.Errorf("rule %q: expected \"<days> <times>\"", s)
 	}
 
-	if daySpec == "*" {
+	if looksLikeDate(daySpec) {
+		dr, err := parseDateSpec(daySpec)
+		if err != nil {
+			return r, fmt.Errorf("rule %q: %w", s, err)
+		}
+		r.dates = dr
+	} else if daySpec == "*" {
 		for i := range r.days {
 			r.days[i] = true
 		}
@@ -151,6 +187,61 @@ func parseRule(s string) (rule, error) {
 	return r, nil
 }
 
+// looksLikeDate distinguishes "2026-12-24" from "Mon-Fri": both contain a
+// dash, but only one starts with a digit.
+func looksLikeDate(s string) bool {
+	return s != "" && s[0] >= '0' && s[0] <= '9'
+}
+
+func parseDateSpec(s string) (*dateRange, error) {
+	from, to, ok := strings.Cut(s, "..")
+	if !ok {
+		from, to = s, s
+	}
+	fy, fm, fd, err := parseDate(from)
+	if err != nil {
+		return nil, err
+	}
+	ty, tm, td, err := parseDate(to)
+	if err != nil {
+		return nil, err
+	}
+	if (fy == 0) != (ty == 0) {
+		return nil, fmt.Errorf("date range %q mixes a year with a yearly date", s)
+	}
+	if fy > 0 {
+		start := time.Date(fy, time.Month(fm), fd, 0, 0, 0, 0, time.UTC)
+		end := time.Date(ty, time.Month(tm), td, 0, 0, 0, 0, time.UTC)
+		if end.Before(start) {
+			return nil, fmt.Errorf("date range %q ends before it starts", s)
+		}
+	}
+	return &dateRange{fromYear: fy, fromMonth: fm, fromDay: fd,
+		toYear: ty, toMonth: tm, toDay: td}, nil
+}
+
+// parseDate accepts YYYY-MM-DD and MM-DD; the latter means every year.
+func parseDate(s string) (year, month, day int, err error) {
+	parts := strings.Split(strings.TrimSpace(s), "-")
+	switch len(parts) {
+	case 3:
+		if _, err := fmt.Sscanf(parts[0], "%d", &year); err != nil || year < 1970 || year > 9999 {
+			return 0, 0, 0, fmt.Errorf("invalid year in date %q", s)
+		}
+		parts = parts[1:]
+	case 2:
+	default:
+		return 0, 0, 0, fmt.Errorf("invalid date %q, expected YYYY-MM-DD or MM-DD", s)
+	}
+	if _, err := fmt.Sscanf(parts[0], "%d", &month); err != nil || month < 1 || month > 12 {
+		return 0, 0, 0, fmt.Errorf("invalid month in date %q", s)
+	}
+	if _, err := fmt.Sscanf(parts[1], "%d", &day); err != nil || day < 1 || day > 31 {
+		return 0, 0, 0, fmt.Errorf("invalid day in date %q", s)
+	}
+	return year, month, day, nil
+}
+
 func parseWeekday(s string) (time.Weekday, error) {
 	key := strings.ToLower(strings.TrimSpace(s))
 	if len(key) > 3 {
@@ -187,6 +278,18 @@ func parseClock(s string) (int, error) {
 
 func (r rule) matches(t time.Time) bool {
 	minutes := t.Hour()*60 + t.Minute()
+	if r.dates != nil {
+		if !r.dates.contains(t) {
+			return false
+		}
+		if r.wholeDay {
+			return true
+		}
+		if r.endMin > r.startMin {
+			return minutes >= r.startMin && minutes < r.endMin
+		}
+		return minutes >= r.startMin || minutes < r.endMin
+	}
 	if r.wholeDay {
 		return r.days[int(t.Weekday())]
 	}
@@ -224,21 +327,29 @@ func (w *Window) OpenAt(t time.Time) bool {
 }
 
 // NextOpen returns the next instant at or after t at which the window is open.
-// It scans minute by minute for eight days; if the window never opens within
-// that period it returns t plus eight days so callers keep re-evaluating
-// instead of blocking forever.
+//
+// It scans minute by minute for two days, which covers every weekly rule
+// exactly, and then in quarter-hour steps for three months, which is enough to
+// see past a multi-day calendar blackout. If nothing opens within that period
+// it returns t plus a day so callers keep re-evaluating instead of blocking.
 func (w *Window) NextOpen(t time.Time) time.Time {
 	if w.OpenAt(t) {
 		return t
 	}
 	cur := t.Truncate(time.Minute)
-	for i := 0; i < 8*24*60; i++ {
+	for i := 0; i < 2*24*60; i++ {
 		cur = cur.Add(time.Minute)
 		if w.OpenAt(cur) {
 			return cur
 		}
 	}
-	return t.Add(8 * 24 * time.Hour)
+	for i := 0; i < 90*24*4; i++ {
+		cur = cur.Add(15 * time.Minute)
+		if w.OpenAt(cur) {
+			return cur
+		}
+	}
+	return t.Add(24 * time.Hour)
 }
 
 func (w *Window) location() *time.Location {

@@ -135,6 +135,19 @@ func (g gitRunner) commitTime(ctx context.Context, mirrorDir, sha string) time.T
 	return t
 }
 
+// commitIdentities returns the author and committer email of a commit.
+func (g gitRunner) commitIdentities(ctx context.Context, mirrorDir, sha string) (author, committer string, err error) {
+	out, err := g.run(ctx, mirrorDir, "show", "-s", "--format=%ae%n%ce", sha)
+	if err != nil {
+		return "", "", err
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) < 2 {
+		return "", "", fmt.Errorf("could not read the author of %s", sha)
+	}
+	return strings.TrimSpace(lines[0]), strings.TrimSpace(lines[1]), nil
+}
+
 // verifySignature checks a signed tag or commit against an allowed-signers file.
 func (g gitRunner) verifySignature(ctx context.Context, mirrorDir, ref string, tag bool, allowedSigners string) error {
 	args := []string{}

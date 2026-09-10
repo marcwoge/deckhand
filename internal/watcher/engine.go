@@ -35,6 +35,18 @@ type Engine struct {
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
+
+	// gen is the currently running set of goroutines. A reload stops the old
+	// generation and starts a new one.
+	genMu sync.Mutex
+	gen   *generation
+}
+
+// generation is one running set of watch, heartbeat and command goroutines.
+type generation struct {
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+	names  []string
 }
 
 // Options configure a new Engine.
@@ -61,7 +73,7 @@ func New(cfg *config.Config, o Options) (*Engine, error) {
 	if logf == nil {
 		logf = func(string, string, ...interface{}) {}
 	}
-	al, err := audit.Open(stateDir)
+	al, err := audit.Open(stateDir, cfg.Defaults.Audit.MaxSize.B(10<<20), cfg.Defaults.Audit.Keep)
 	if err != nil {
 		return nil, fmt.Errorf("audit log: %w", err)
 	}
@@ -175,43 +187,117 @@ func (e *Engine) Resume() error {
 // Run starts one goroutine per enabled watch, plus the heartbeat and the
 // Telegram command listener, and blocks until ctx is done.
 func (e *Engine) Run(ctx context.Context) error {
+	if err := e.start(ctx); err != nil {
+		return err
+	}
+	<-ctx.Done()
+	e.stop()
+	return ctx.Err()
+}
+
+// start launches a new generation of goroutines.
+func (e *Engine) start(ctx context.Context) error {
 	enabled := 0
-	var wg sync.WaitGroup
+	for _, w := range e.cfg.Watches {
+		if w.IsEnabled() {
+			enabled++
+		}
+	}
+	if enabled == 0 {
+		return fmt.Errorf("all watches are disabled")
+	}
+
+	genCtx, cancel := context.WithCancel(ctx)
+	g := &generation{cancel: cancel}
 
 	if p := heartbeat.New(e.cfg.Heartbeat, e.host, func(f string, a ...interface{}) {
 		e.logf("heartbeat", f, a...)
 	}); p != nil {
-		wg.Add(1)
+		g.wg.Add(1)
 		go func() {
-			defer wg.Done()
-			p.Run(ctx)
+			defer g.wg.Done()
+			p.Run(genCtx)
 		}()
 	}
 	if e.cfg.Notify.CommandChannel() != nil {
-		wg.Add(1)
+		g.wg.Add(1)
 		go func() {
-			defer wg.Done()
-			e.runCommandBot(ctx)
+			defer g.wg.Done()
+			e.runCommandBot(genCtx)
 		}()
 	}
-
 	for _, w := range e.cfg.Watches {
 		if !w.IsEnabled() {
 			e.logf(w.Name, "disabled in config, skipping")
 			continue
 		}
-		enabled++
-		wg.Add(1)
+		g.names = append(g.names, w.Name)
+		g.wg.Add(1)
 		go func(w *config.Watch) {
-			defer wg.Done()
-			e.runWatch(ctx, w)
+			defer g.wg.Done()
+			e.runWatch(genCtx, w)
 		}(w)
 	}
-	if enabled == 0 {
-		return fmt.Errorf("all watches are disabled")
+
+	e.genMu.Lock()
+	e.gen = g
+	e.genMu.Unlock()
+	return nil
+}
+
+// stop ends the current generation, waiting for any deployment that is already
+// running rather than killing it half way through.
+func (e *Engine) stop() {
+	e.genMu.Lock()
+	g := e.gen
+	e.gen = nil
+	e.genMu.Unlock()
+	if g == nil {
+		return
 	}
-	wg.Wait()
-	return ctx.Err()
+	// Taking each watch lock waits for an in-flight deployment to finish.
+	for _, name := range g.names {
+		lock := e.lockFor(name)
+		lock.Lock()
+		lock.Unlock() //nolint:staticcheck // we only want to wait, not to hold
+	}
+	g.cancel()
+	g.wg.Wait()
+}
+
+// Reload re-reads the configuration file and restarts everything with it.
+//
+// An invalid configuration is reported and otherwise ignored: the worker keeps
+// running with what it had, because stopping deployments because of a typo is
+// worse than deploying slightly stale settings.
+func (e *Engine) Reload(ctx context.Context) error {
+	newCfg, err := config.Load(e.cfg.Path)
+	if err != nil {
+		return fmt.Errorf("configuration not reloaded, keeping the running one: %w", err)
+	}
+	token, err := newCfg.GitHub.ResolveToken()
+	if err != nil {
+		return fmt.Errorf("configuration not reloaded, keeping the running one: %w", err)
+	}
+	notifier, notifyErr := notify.New(newCfg.Notify)
+	if notifyErr != nil {
+		e.logf("notify", "warning: %v", notifyErr)
+	}
+
+	e.logf("config", "reloading %s", newCfg.Path)
+	e.stop()
+
+	e.cfg = newCfg
+	e.token = token
+	e.client = gh.New(newCfg.GitHub.API, token)
+	e.anon = gh.New(newCfg.GitHub.API, "")
+	e.notifier = notifier
+
+	if err := e.start(ctx); err != nil {
+		return fmt.Errorf("reloaded configuration could not be started: %w", err)
+	}
+	e.logf("config", "reloaded: %d watches", len(newCfg.Watches))
+	return nil
 }
 
 // runWatch is the polling loop for a single watch.

@@ -309,3 +309,43 @@ func splitVersion(s string) []int {
 	}
 	return out
 }
+
+// RateLimitStatus is the current standing with the API.
+type RateLimitStatus struct {
+	Limit     int
+	Remaining int
+	Reset     time.Time
+}
+
+// RateLimit reports the current rate limit. The endpoint itself is free, and
+// it doubles as a way to check that a token is valid.
+func (c *Client) RateLimit(ctx context.Context) (*RateLimitStatus, error) {
+	var body struct {
+		Resources struct {
+			Core struct {
+				Limit     int   `json:"limit"`
+				Remaining int   `json:"remaining"`
+				Reset     int64 `json:"reset"`
+			} `json:"core"`
+		} `json:"resources"`
+	}
+	if err := c.get(ctx, "/rate_limit", &body); err != nil {
+		return nil, err
+	}
+	core := body.Resources.Core
+	return &RateLimitStatus{Limit: core.Limit, Remaining: core.Remaining,
+		Reset: time.Unix(core.Reset, 0)}, nil
+}
+
+// Repository reports whether a repository can be read with the current
+// credentials, and whether it is private.
+func (c *Client) Repository(ctx context.Context, repo string) (private bool, err error) {
+	var body struct {
+		Private  bool `json:"private"`
+		Archived bool `json:"archived"`
+	}
+	if err := c.get(ctx, "/repos/"+repo, &body); err != nil {
+		return false, err
+	}
+	return body.Private, nil
+}
