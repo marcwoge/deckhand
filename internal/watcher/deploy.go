@@ -73,6 +73,7 @@ func (e *Engine) deployTarget(ctx context.Context, w *config.Watch, t *gh.Target
 		st.PreviousRelease, st.PreviousSHA = st.CurrentRelease, st.LastSHA
 		st.CurrentRelease = currentReleaseDir(w, d, t)
 		st.LastSHA, st.LastRef = t.SHA, t.Ref
+		st.ActiveSHA, st.ActiveRelease = t.SHA, st.CurrentRelease
 		st.LastSuccess = time.Now().UTC()
 		st.LastError = ""
 		st.Failures = 0
@@ -94,19 +95,33 @@ func (e *Engine) deployTarget(ctx context.Context, w *config.Watch, t *gh.Target
 	failure := err
 
 	// A failed deployment leaves the previous revision running: put it back.
+	// Roll back to what was running before this attempt. A failed deployment
+	// leaves the state untouched, so that is CurrentRelease - not
+	// PreviousRelease, which is a further revision back and belongs to the
+	// manual "deckhand rollback".
 	rolledBack := false
-	if w.Rollback == "auto" && hasPrevious(w, st) {
-		log("rolling back to %s", previousLabel(w, st))
-		if rbErr := e.rollback(ctx, w, d, st, log); rbErr != nil {
+	switch {
+	case w.Rollback != "auto":
+	case hasRunning(w, st):
+		log("rolling back to %s", deploy.Short(st.LastSHA))
+		if rbErr := e.rollbackTo(ctx, w, d, st, log, st.CurrentRelease, st.LastSHA); rbErr != nil {
 			log("rollback failed: %v", rbErr)
 			_ = e.audit.Write(audit.Event{Watch: w.Name, Repo: w.Repo, Action: "rollback",
 				Result: "failed", Message: rbErr.Error()})
 		} else {
 			rolledBack = true
-			log("rolled back to %s", previousLabel(w, st))
+			st.ActiveSHA, st.ActiveRelease = st.LastSHA, st.CurrentRelease
+			log("rolled back to %s", deploy.Short(st.LastSHA))
 			_ = e.audit.Write(audit.Event{Watch: w.Name, Repo: w.Repo, Action: "rollback",
-				Result: "ok", SHA: st.PreviousSHA})
+				Result: "ok", SHA: st.LastSHA})
 		}
+	default:
+		// Nothing was running before, so the failed revision stays on disk.
+		// Say so plainly rather than leaving the state claiming otherwise.
+		log("nothing to roll back to; %s stays in place but did not pass its checks",
+			deploy.Short(t.SHA))
+		_ = e.audit.Write(audit.Event{Watch: w.Name, Repo: w.Repo, Action: "rollback",
+			Result: "failed", SHA: t.SHA, Message: "no previous revision to roll back to"})
 	}
 
 	if len(w.OnFailure) > 0 {
@@ -170,6 +185,12 @@ func (e *Engine) runDeploySteps(ctx context.Context, w *config.Watch, d *deploy.
 	if err := d.Activate(releaseDir); err != nil {
 		return fmt.Errorf("activate: %w", err)
 	}
+	// Record what is live before running anything, so a failure cannot leave
+	// the state describing a revision that is not on disk.
+	st.ActiveSHA, st.ActiveRelease = t.SHA, releaseDir
+	if err := st.Save(); err != nil {
+		log("warning: could not save state: %v", err)
+	}
 
 	env := e.runnerEnv(w, d, t, st, "deploy", releaseDir)
 	if _, err := runner.RunAll(ctx, w.Run, runner.Options{
@@ -188,15 +209,15 @@ func (e *Engine) runDeploySteps(ctx context.Context, w *config.Watch, d *deploy.
 
 // rollback reactivates the previous revision and re-runs the deploy commands so
 // the service actually goes back, not just the files on disk.
-func (e *Engine) rollback(ctx context.Context, w *config.Watch, d *deploy.Deployer,
-	st *deploy.State, log func(string, ...interface{})) error {
+func (e *Engine) rollbackTo(ctx context.Context, w *config.Watch, d *deploy.Deployer,
+	st *deploy.State, log func(string, ...interface{}), releaseDir, sha string) error {
 
-	if err := d.Rollback(ctx, st); err != nil {
+	if err := d.RollbackTo(ctx, releaseDir, sha); err != nil {
 		return err
 	}
-	env := e.runnerEnv(w, d, nil, st, "rollback", st.PreviousRelease)
-	env["DECKHAND_SHA"] = st.PreviousSHA
-	env["DECKHAND_SHORT_SHA"] = deploy.Short(st.PreviousSHA)
+	env := e.runnerEnv(w, d, nil, st, "rollback", releaseDir)
+	env["DECKHAND_SHA"] = sha
+	env["DECKHAND_SHORT_SHA"] = deploy.Short(sha)
 	_, err := runner.RunAll(ctx, w.Run, runner.Options{
 		WorkDir: d.WorkDir(),
 		Timeout: time.Duration(w.CommandTimeout),
@@ -231,11 +252,12 @@ func (e *Engine) Rollback(ctx context.Context, w *config.Watch) error {
 		token = ""
 	}
 	d := deploy.New(w, e.watchStateDir(w), token, e.binary, log)
-	if err := e.rollback(ctx, w, d, st, log); err != nil {
+	if err := e.rollbackTo(ctx, w, d, st, log, st.PreviousRelease, st.PreviousSHA); err != nil {
 		return err
 	}
 	st.CurrentRelease, st.PreviousRelease = st.PreviousRelease, ""
 	st.LastSHA, st.PreviousSHA = st.PreviousSHA, ""
+	st.ActiveSHA, st.ActiveRelease = st.LastSHA, st.CurrentRelease
 	st.LastSuccess = time.Now().UTC()
 	st.Failures = 0
 	st.LastError = ""
@@ -255,6 +277,19 @@ func (e *Engine) ResumeWatch(w *config.Watch) error {
 	st.LastError = ""
 	_ = e.audit.Write(audit.Event{Watch: w.Name, Repo: w.Repo, Action: "resume", Result: "ok"})
 	return st.Save()
+}
+
+// hasRunning reports whether a revision is live that a failed deployment can
+// be rolled back to.
+func hasRunning(w *config.Watch, st *deploy.State) bool {
+	if w.Strategy == config.StrategyInplace {
+		return st.LastSHA != ""
+	}
+	if st.CurrentRelease == "" {
+		return false
+	}
+	_, err := os.Stat(st.CurrentRelease)
+	return err == nil
 }
 
 func hasPrevious(w *config.Watch, st *deploy.State) bool {

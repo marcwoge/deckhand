@@ -296,9 +296,18 @@ Statt `http:` kannst du `cmd:` mit einem beliebigen Befehl verwenden; Exit-Code
 null bedeutet gesund.
 
 Scheitern die Deploy-Befehle oder besteht der Health-Check nie, und steht
-`rollback` auf `auto`, schaltet Deckhand auf das vorherige Release zurück **und
-führt die Deploy-Befehle erneut aus** — so kommt tatsächlich der Dienst zurück,
-nicht nur die Dateien. Ohne Health-Check gilt ein Deployment als erfolgreich,
+`rollback` auf `auto`, schaltet Deckhand auf **die Revision zurück, die vor
+diesem Versuch lief**, und führt die Deploy-Befehle erneut aus — so kommt
+tatsächlich der Dienst zurück, nicht nur die Dateien. (`deckhand rollback` ist
+etwas anderes: Es geht eine Revision weiter zurück, von der laufenden auf die
+davor.)
+
+Lief noch gar nichts — ein erstes Deployment, das scheitert —, gibt es nichts,
+wohin zurückgeschaltet werden könnte. Die gescheiterte Revision bleibt liegen,
+und `deckhand status` sagt das mit `LIVE <sha> UNVERIFIED`, statt eine Revision
+zu melden, die nicht aktiv ist.
+
+Ohne Health-Check gilt ein Deployment als erfolgreich,
 sobald deine Befehle mit null enden, und das ist oft nicht dasselbe.
 
 ### Prüfungen

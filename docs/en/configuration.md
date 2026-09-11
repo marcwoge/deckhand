@@ -290,8 +290,16 @@ Instead of `http:` you can use `cmd:` with any command; a zero exit status
 means healthy.
 
 If the deploy commands fail, or the health check never passes, and `rollback`
-is `auto`, Deckhand switches back to the previous release **and runs the deploy
-commands again** — so the service actually returns, not just the files. Without
+is `auto`, Deckhand switches back to **the revision that was running before
+this attempt** and runs the deploy commands again — so the service actually
+returns, not just the files. (`deckhand rollback` is different: it goes one
+revision further back, from what is running now to what ran before it.)
+
+When nothing was running yet — a first deployment that fails — there is nothing
+to return to. The failed revision stays in place, and `deckhand status` says so
+with `LIVE <sha> UNVERIFIED` rather than reporting a revision that is not there.
+
+Without
 a health check a deployment counts as successful as soon as your commands exit
 zero, which is often not the same thing.
 

@@ -125,9 +125,8 @@ func TestDeployPrepareActivateRollback(t *testing.T) {
 		t.Errorf("release metadata missing: %v", err)
 	}
 
-	// Rolling back restores the previous tree.
-	st := &State{CurrentRelease: rel2, PreviousRelease: rel1, PreviousSHA: first}
-	if err := d.Rollback(ctx, st); err != nil {
+	// Rolling back restores the named tree.
+	if err := d.RollbackTo(ctx, rel1, first); err != nil {
 		t.Fatalf("rollback: %v", err)
 	}
 	body, _ = os.ReadFile(filepath.Join(d.WorkDir(), "app.txt"))

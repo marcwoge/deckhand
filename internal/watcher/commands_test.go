@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/marcwoge/deckhand/internal/config"
+	"github.com/marcwoge/deckhand/internal/deploy"
 	"github.com/marcwoge/deckhand/internal/telegram"
 )
 
@@ -357,5 +358,60 @@ func TestReloadKeepsRunningConfigOnError(t *testing.T) {
 	}
 	if _, err := e.Watch("shop"); err != nil {
 		t.Errorf("the original watch must still be configured: %v", err)
+	}
+}
+
+// A failed deployment must roll back to the revision that was running before
+// it, not to the one before that. The state is untouched by a failure, so the
+// running revision is CurrentRelease - reaching for PreviousRelease here would
+// skip a version back.
+func TestAutomaticRollbackTargetsTheRunningRevision(t *testing.T) {
+	e := testEngine(t)
+	w, err := e.Watch("shop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	st := &deploy.State{
+		CurrentRelease:  filepath.Join(dir, "running"),
+		LastSHA:         "2222222222222222222222222222222222222222",
+		PreviousRelease: filepath.Join(dir, "older"),
+		PreviousSHA:     "1111111111111111111111111111111111111111",
+	}
+	for _, d := range []string{st.CurrentRelease, st.PreviousRelease} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if !hasRunning(w, st) {
+		t.Fatal("a live release must be recognised as a rollback target")
+	}
+	// Drop the running release: then there is nothing to roll back to, and the
+	// older one must not be used as a substitute.
+	if err := os.RemoveAll(st.CurrentRelease); err != nil {
+		t.Fatal(err)
+	}
+	if hasRunning(w, st) {
+		t.Error("a missing release must not count as a rollback target")
+	}
+	if !hasPrevious(w, st) {
+		t.Error("the manual rollback still has its own target")
+	}
+}
+
+// The anonymous slowdown exists for github.com's 60-per-hour cap. A GitHub
+// Enterprise server or a mirror has its own limits, so the configured interval
+// must survive there.
+func TestAnonymousSlowdownOnlyAppliesToGitHubCom(t *testing.T) {
+	for api, want := range map[string]bool{
+		"":                               true,
+		"https://api.github.com":         true,
+		"https://ghe.example.com/api/v3": false,
+		"http://127.0.0.1:8799":          false,
+	} {
+		if got := isPublicGitHub(api); got != want {
+			t.Errorf("isPublicGitHub(%q) = %v, want %v", api, got, want)
+		}
 	}
 }

@@ -248,25 +248,24 @@ func (d *Deployer) Activate(releaseDir string) error {
 	return replaceLink(d.currentLink(), releaseDir, true)
 }
 
-// Rollback reactivates a previous release. For the in-place strategy the old
-// revision is exported over the working tree again.
-func (d *Deployer) Rollback(ctx context.Context, st *State) error {
+// RollbackTo reactivates a named revision. The caller decides which one: after
+// a failed deployment that is the revision that was running before it, while
+// "deckhand rollback" means the one before that.
+func (d *Deployer) RollbackTo(ctx context.Context, releaseDir, sha string) error {
 	if d.Watch.Strategy == config.StrategyInplace {
-		if st.PreviousSHA == "" {
-			return fmt.Errorf("no previous revision recorded")
+		if sha == "" {
+			return fmt.Errorf("no revision recorded to roll back to")
 		}
-		if _, err := d.git.exportTree(ctx, d.mirrorDir(), st.PreviousSHA, d.Watch.Path, true); err != nil {
-			return err
-		}
-		return nil
+		_, err := d.git.exportTree(ctx, d.mirrorDir(), sha, d.Watch.Path, true)
+		return err
 	}
-	if st.PreviousRelease == "" {
-		return fmt.Errorf("no previous release recorded")
+	if releaseDir == "" {
+		return fmt.Errorf("no release recorded to roll back to")
 	}
-	if _, err := os.Stat(st.PreviousRelease); err != nil {
-		return fmt.Errorf("previous release %s is gone: %w", st.PreviousRelease, err)
+	if _, err := os.Stat(releaseDir); err != nil {
+		return fmt.Errorf("release %s is gone: %w", releaseDir, err)
 	}
-	return replaceLink(d.currentLink(), st.PreviousRelease, true)
+	return replaceLink(d.currentLink(), releaseDir, true)
 }
 
 // Prune deletes old release directories, keeping the newest keep entries plus

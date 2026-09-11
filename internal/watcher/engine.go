@@ -303,10 +303,14 @@ func (e *Engine) Reload(ctx context.Context) error {
 // runWatch is the polling loop for a single watch.
 func (e *Engine) runWatch(ctx context.Context, w *config.Watch) {
 	interval := time.Duration(w.PollInterval)
-	if w.Auth == "none" && !e.Authenticated() && interval < 5*time.Minute {
-		// Unauthenticated requests are capped at 60 per hour and IP address.
+	// github.com caps unauthenticated requests at 60 per hour and IP address,
+	// which one watch at a minute would exhaust. Other endpoints - GitHub
+	// Enterprise, a mirror, a test server - have their own limits, so the
+	// configured interval is honoured there.
+	if w.Auth == "none" && !e.Authenticated() && interval < 5*time.Minute &&
+		isPublicGitHub(e.cfg.GitHub.API) {
 		interval = 5 * time.Minute
-		e.logf(w.Name, "no token available; polling every %s to stay inside the anonymous rate limit", interval)
+		e.logf(w.Name, "no token available; polling every %s to stay inside github.com's anonymous rate limit", interval)
 	}
 	e.logf(w.Name, "watching %s (%s), window %s, every %s",
 		w.Repo, describeTrigger(w), w.Window.Describe(), interval)
@@ -397,6 +401,12 @@ func (e *Engine) runWatch(ctx context.Context, w *config.Watch) {
 
 		timer.Reset(withJitter(interval))
 	}
+}
+
+// isPublicGitHub reports whether the configured API is github.com's, whose
+// anonymous rate limit is the one worth slowing down for.
+func isPublicGitHub(api string) bool {
+	return api == "" || api == "https://api.github.com" || api == "http://api.github.com"
 }
 
 func describeTrigger(w *config.Watch) string {

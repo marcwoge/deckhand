@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -103,7 +104,7 @@ RestrictSUIDSGID=yes
 {{STATE}}
 
 [Install]
-WantedBy=multi-user.target
+WantedBy={{TARGET}}
 `
 
 func installSystemd(p Params, out io.Writer) error {
@@ -126,9 +127,14 @@ func installSystemd(p Params, out io.Writer) error {
 	var path string
 	var systemctl []string
 	if p.SystemWide {
+		// A user manager has no multi-user.target; a system one has no
+		// default.target worth hooking into. Using the wrong one leaves the
+		// service installed but never started.
+		unit = strings.ReplaceAll(unit, "{{TARGET}}", "multi-user.target")
 		path = "/etc/systemd/system/deckhand.service"
 		systemctl = []string{"systemctl"}
 	} else {
+		unit = strings.ReplaceAll(unit, "{{TARGET}}", "default.target")
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return err
@@ -147,7 +153,13 @@ func installSystemd(p Params, out io.Writer) error {
 	runQuiet(append(systemctl, "daemon-reload")...)
 	enable := append(append([]string{}, systemctl...), "enable", "--now", "deckhand.service")
 	if err := run(enable[0], enable[1:]...); err != nil {
-		return fmt.Errorf("enabling the service: %w", err)
+		if !p.SystemWide {
+			return fmt.Errorf("the unit was written to %s but could not be enabled: %w\n"+
+				"If this says \"Failed to connect to bus\", there is no user systemd session - "+
+				"usual over SSH. Run: sudo loginctl enable-linger %s, log in again, and retry; "+
+				"or install machine-wide with --system", path, err, currentUser())
+		}
+		return fmt.Errorf("the unit was written to %s but could not be enabled: %w", path, err)
 	}
 	fmt.Fprintf(out, "service enabled and started\n  status: %s status deckhand\n  logs:   journalctl -u deckhand -f\n",
 		strings.Join(systemctl, " "))
@@ -278,6 +290,20 @@ func uninstallWindows(_ Params, out io.Writer) error {
 	}
 	fmt.Fprintln(out, "scheduled task \"Deckhand\" removed")
 	return nil
+}
+
+// currentUser names the account for the linger hint, falling back to the shell
+// variable when the environment does not say.
+func currentUser() string {
+	for _, key := range []string{"USER", "LOGNAME", "USERNAME"} {
+		if v := os.Getenv(key); v != "" {
+			return v
+		}
+	}
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		return u.Username
+	}
+	return "$USER"
 }
 
 func run(name string, args ...string) error {

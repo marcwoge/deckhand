@@ -94,11 +94,12 @@ with signed checksums and build provenance.
 | Feature | Status |
 |---|---|
 | HTTP and command health checks with retries | ✅ |
-| Automatic rollback to the previous release, including re-running the command | ✅ |
+| Automatic rollback to the revision that was running, re-running the command | ✅ |
 | Manual `deckhand rollback` | ✅ |
 | Circuit breaker: a watch halts after N consecutive failures | ✅ |
 | One deployment at a time per watch | ✅ |
 | State survives restarts, upgrades and reboots | ✅ |
+| State records what is physically live, not only what last succeeded | ✅ |
 | Lock file so two Deckhand processes cannot fight over one path | ✅ |
 
 ### Time windows

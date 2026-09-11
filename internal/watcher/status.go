@@ -25,6 +25,7 @@ type Status struct {
 	Ref         string    `json:"ref,omitempty"`
 	LastSuccess time.Time `json:"last_success,omitempty"`
 	LastAttempt time.Time `json:"last_attempt,omitempty"`
+	ActiveSHA   string    `json:"active_sha,omitempty"`
 	Failures    int       `json:"failures"`
 	Halted      bool      `json:"halted"`
 	Enabled     bool      `json:"enabled"`
@@ -42,7 +43,7 @@ func (e *Engine) Status() ([]Status, error) {
 		out = append(out, Status{
 			Name: w.Name, Repo: w.Repo, Trigger: describeTrigger(w),
 			Window: w.Window.Describe(), Path: w.Path,
-			SHA: st.LastSHA, Ref: st.LastRef, LastSuccess: st.LastSuccess,
+			SHA: st.LastSHA, Ref: st.LastRef, ActiveSHA: st.ActiveSHA, LastSuccess: st.LastSuccess,
 			LastAttempt: st.LastAttempt, Failures: st.Failures, Halted: st.Halted,
 			Enabled: w.IsEnabled(), LastError: st.LastError,
 		})
@@ -90,6 +91,10 @@ func (e *Engine) PrintStatus(w io.Writer, asJSON bool) error {
 		switch {
 		case !s.Enabled:
 			state = "disabled"
+		case s.ActiveSHA != "" && s.ActiveSHA != s.SHA:
+			// What is live is not what last succeeded: a deployment failed and
+			// could not be rolled back.
+			state = "LIVE " + deploy.Short(s.ActiveSHA) + " UNVERIFIED"
 		case s.Halted:
 			state = fmt.Sprintf("HALTED (%d failures)", s.Failures)
 		case s.Failures > 0:

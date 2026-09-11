@@ -109,7 +109,11 @@ func (e *Engine) checkStateDir(r *report) {
 func (e *Engine) checkGitHub(ctx context.Context, r *report) {
 	client := e.client
 	if !e.Authenticated() {
-		r.warn("no token configured: public repositories only, 60 requests/hour per IP")
+		if isPublicGitHub(e.cfg.GitHub.API) {
+			r.warn("no token configured: public repositories only, 60 requests/hour per IP")
+		} else {
+			r.warn("no token configured: only repositories this server serves anonymously")
+		}
 		client = e.anon
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
