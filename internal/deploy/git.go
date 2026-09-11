@@ -214,6 +214,12 @@ func extractTar(r io.Reader, destDir string, overwrite bool) (int, error) {
 		if err != nil {
 			return count, err
 		}
+		// safeJoin already guarantees this. Restating it here keeps the
+		// guarantee next to the writes it protects, where both a reader and a
+		// static analyser can see it without following a call.
+		if target != root && !strings.HasPrefix(target, root+string(os.PathSeparator)) {
+			return count, fmt.Errorf("refusing archive entry outside the release directory: %q", hdr.Name)
+		}
 		switch hdr.Typeflag {
 		case tar.TypeDir:
 			if err := checkTargetInsideRoot(root, target); err != nil {
