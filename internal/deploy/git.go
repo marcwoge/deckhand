@@ -210,16 +210,29 @@ func extractTar(r io.Reader, destDir string, overwrite bool) (int, error) {
 		if err != nil {
 			return count, fmt.Errorf("reading archive: %w", err)
 		}
+		// Every entry is validated here, before the name reaches anything else,
+		// and only the canonical "target" is used below.
+		//
+		// safeJoin performs the same two checks. They are repeated here on
+		// purpose: this loop is where the filesystem is touched, so the
+		// guarantee belongs next to the calls it protects rather than a
+		// function away - for a reader and for static analysis alike. If you
+		// change one, change the other.
+		for _, separator := range []string{"/", `\`} {
+			for _, segment := range strings.Split(hdr.Name, separator) {
+				if segment == ".." {
+					return count, fmt.Errorf("refusing archive entry containing \"..\": %q", hdr.Name)
+				}
+			}
+		}
 		target, err := safeJoin(root, hdr.Name)
 		if err != nil {
 			return count, err
 		}
-		// safeJoin already guarantees this. Restating it here keeps the
-		// guarantee next to the writes it protects, where both a reader and a
-		// static analyser can see it without following a call.
 		if target != root && !strings.HasPrefix(target, root+string(os.PathSeparator)) {
 			return count, fmt.Errorf("refusing archive entry outside the release directory: %q", hdr.Name)
 		}
+		targetDir := filepath.Dir(target)
 		switch hdr.Typeflag {
 		case tar.TypeDir:
 			if err := checkTargetInsideRoot(root, target); err != nil {
@@ -229,10 +242,10 @@ func extractTar(r io.Reader, destDir string, overwrite bool) (int, error) {
 				return count, err
 			}
 		case tar.TypeReg:
-			if err := checkTargetInsideRoot(root, filepath.Dir(target)); err != nil {
+			if err := checkTargetInsideRoot(root, targetDir); err != nil {
 				return count, err
 			}
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			if err := os.MkdirAll(targetDir, 0o755); err != nil {
 				return count, err
 			}
 			if err := checkTargetInsideRoot(root, target); err != nil {
@@ -264,16 +277,16 @@ func extractTar(r io.Reader, destDir string, overwrite bool) (int, error) {
 			linkTarget := hdr.Linkname
 			resolved := linkTarget
 			if !filepath.IsAbs(resolved) {
-				resolved = filepath.Join(filepath.Dir(target), linkTarget)
+				resolved = filepath.Join(targetDir, linkTarget)
 			}
 			if !within(root, resolved) {
 				return count, fmt.Errorf("refusing symlink %q -> %q: points outside the release directory",
 					hdr.Name, linkTarget)
 			}
-			if err := checkTargetInsideRoot(root, filepath.Dir(target)); err != nil {
+			if err := checkTargetInsideRoot(root, targetDir); err != nil {
 				return count, err
 			}
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			if err := os.MkdirAll(targetDir, 0o755); err != nil {
 				return count, err
 			}
 			if err := checkTargetInsideRoot(root, target); err != nil {
@@ -294,10 +307,10 @@ func extractTar(r io.Reader, destDir string, overwrite bool) (int, error) {
 			if err := checkTargetInsideRoot(root, source); err != nil {
 				return count, err
 			}
-			if err := checkTargetInsideRoot(root, filepath.Dir(target)); err != nil {
+			if err := checkTargetInsideRoot(root, targetDir); err != nil {
 				return count, err
 			}
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			if err := os.MkdirAll(targetDir, 0o755); err != nil {
 				return count, err
 			}
 			if err := checkTargetInsideRoot(root, target); err != nil {
