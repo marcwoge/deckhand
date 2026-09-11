@@ -5,6 +5,10 @@
 **The quiet crew member for your servers.**
 It watches your GitHub repositories, pulls every new release or commit, and runs the one command that makes it live.
 
+[![CI](https://github.com/marcwoge/deckhand/actions/workflows/ci.yml/badge.svg)](https://github.com/marcwoge/deckhand/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/marcwoge/deckhand)](https://github.com/marcwoge/deckhand/releases/latest)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
 [Deutsch](README.de.md) · [Documentation](docs/en/) · [Roadmap](ROADMAP.md) · [Security](SECURITY.md)
 
 </div>

@@ -40,9 +40,11 @@ explicitly *not* a CI system, an orchestrator, or a replacement for Kubernetes.
 
 ---
 
-## v0.1 — the working core
+## v0.1 — the working core ✅ released
 
-The first release covers the complete loop from trigger to running service.
+[v0.1.0](https://github.com/marcwoge/deckhand/releases/tag/v0.1.0) covers the
+complete loop from trigger to running service. Binaries for seven platforms,
+with signed checksums and build provenance.
 
 ### Configuration
 | Feature | Status |
@@ -140,7 +142,7 @@ The first release covers the complete loop from trigger to running service.
 | Signature verification for tags and commits (`verify:`) | ✅ |
 | Pin a watch to an exact SHA | ✅ |
 | Allowed-author lists | ✅ |
-| Signed releases (cosign, keyless) with build provenance | ✅ |
+| Signed releases (cosign, keyless) with build provenance | ✅ verified against v0.1.0 |
 
 ---
 
