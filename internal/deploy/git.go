@@ -200,6 +200,10 @@ func extractTar(r io.Reader, destDir string, overwrite bool) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	// Every extracted path must start with this. Computed once so the check
+	// below stays a single comparison.
+	rootPrefix := root + string(os.PathSeparator)
+
 	tr := tar.NewReader(r)
 	count := 0
 	for {
@@ -229,7 +233,7 @@ func extractTar(r io.Reader, destDir string, overwrite bool) (int, error) {
 		if err != nil {
 			return count, err
 		}
-		if target != root && !strings.HasPrefix(target, root+string(os.PathSeparator)) {
+		if !strings.HasPrefix(target, rootPrefix) {
 			return count, fmt.Errorf("refusing archive entry outside the release directory: %q", hdr.Name)
 		}
 		targetDir := filepath.Dir(target)
@@ -304,6 +308,10 @@ func extractTar(r io.Reader, destDir string, overwrite bool) (int, error) {
 			if err != nil {
 				return count, err
 			}
+			if !strings.HasPrefix(source, rootPrefix) {
+				return count, fmt.Errorf("refusing hard link to %q: outside the release directory",
+					hdr.Linkname)
+			}
 			if err := checkTargetInsideRoot(root, source); err != nil {
 				return count, err
 			}
@@ -362,11 +370,18 @@ func safeJoin(root, name string) (string, error) {
 	if clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
 		return "", fmt.Errorf("refusing archive entry escaping the release directory: %q", name)
 	}
+	// An entry naming the root itself carries nothing to extract, and allowing
+	// it would mean every later check needs an exception for target == root.
+	if clean == "." {
+		return "", fmt.Errorf("refusing archive entry naming the release directory itself: %q", name)
+	}
 
 	target := filepath.Join(root, clean)
 
-	// Belt and braces: the joined path must still start at root.
-	if target != root && !strings.HasPrefix(target, root+string(os.PathSeparator)) {
+	// Every target must sit below the root. Kept as a single unconditional
+	// HasPrefix check: the safe path is exactly "prefix matched", with nothing
+	// else folded into the condition.
+	if !strings.HasPrefix(target, root+string(os.PathSeparator)) {
 		return "", fmt.Errorf("refusing archive entry outside the release directory: %q", name)
 	}
 	if !within(root, target) {

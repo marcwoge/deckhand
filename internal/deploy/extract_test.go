@@ -268,3 +268,13 @@ func TestSafeJoinAcceptsLegitimateNames(t *testing.T) {
 		}
 	}
 }
+
+// An entry naming the root itself is refused: it carries nothing, and allowing
+// it would force every path check to carry an exception.
+func TestSafeJoinRejectsRootItself(t *testing.T) {
+	for _, name := range []string{".", "./", "a/.."} {
+		if got, err := safeJoin("/srv/app/releases/abc", name); err == nil {
+			t.Errorf("safeJoin(%q) = %q, want an error", name, got)
+		}
+	}
+}
