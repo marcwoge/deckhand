@@ -24,7 +24,9 @@ import (
 type Deployer struct {
 	Watch    *config.Watch
 	StateDir string
-	Token    string
+	// Token supplies the credential for fetching. It is called per fetch rather
+	// than stored, so an installation token that renews hourly just works.
+	Token gh.TokenSource
 	// Askpass is the path to the deckhand binary, used as GIT_ASKPASS helper.
 	Askpass string
 	Logf    func(format string, args ...interface{})
@@ -32,15 +34,33 @@ type Deployer struct {
 	git gitRunner
 }
 
-// New returns a Deployer for a watch.
-func New(w *config.Watch, stateDir, token, askpass string, logf func(string, ...interface{})) *Deployer {
+// New returns a Deployer for a watch. token may be nil for public sources.
+func New(w *config.Watch, stateDir string, token gh.TokenSource, askpass string,
+	logf func(string, ...interface{})) *Deployer {
+
 	if logf == nil {
 		logf = func(string, ...interface{}) {}
 	}
 	return &Deployer{
 		Watch: w, StateDir: stateDir, Token: token, Askpass: askpass, Logf: logf,
-		git: gitRunner{askpass: askpass, token: token, allowLocal: isLocalSource(w.CloneURL)},
+		// Local git operations need no credential; fetching builds its own
+		// runner with a current one.
+		git: gitRunner{askpass: askpass, allowLocal: isLocalSource(w.CloneURL)},
 	}
+}
+
+// fetchRunner returns a git runner carrying a current credential.
+func (d *Deployer) fetchRunner(ctx context.Context) (gitRunner, error) {
+	runner := d.git
+	if d.Token == nil {
+		return runner, nil
+	}
+	token, err := d.Token(ctx, d.Watch.Repo)
+	if err != nil {
+		return runner, fmt.Errorf("credential for %s: %w", d.Watch.Repo, err)
+	}
+	runner.token = token
+	return runner, nil
 }
 
 func (d *Deployer) mirrorDir() string   { return filepath.Join(d.StateDir, "repo.git") }
@@ -86,7 +106,11 @@ func (d *Deployer) Fetch(ctx context.Context) error {
 	if err := os.MkdirAll(d.StateDir, 0o750); err != nil {
 		return err
 	}
-	return d.git.ensureMirror(ctx, d.mirrorDir(), d.cloneURL())
+	runner, err := d.fetchRunner(ctx)
+	if err != nil {
+		return err
+	}
+	return runner.ensureMirror(ctx, d.mirrorDir(), d.cloneURL())
 }
 
 // Verify applies the optional supply-chain checks configured for the watch.

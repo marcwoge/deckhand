@@ -333,3 +333,54 @@ watch:
 		t.Fatalf("a name reused in an included file must be reported, got %v", err)
 	}
 }
+
+func TestGitHubAppConfig(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "app.pem")
+	if err := os.WriteFile(keyPath, []byte("-----BEGIN RSA PRIVATE KEY-----\nx\n-----END RSA PRIVATE KEY-----\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	body := strings.Replace(minimal, "version: 1", "version: 1\ngithub:\n  app:\n    id: \"123456\"\n    private_key_file: "+keyPath+"\n", 1)
+	cfg, err := Load(write(t, body))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.GitHub.App == nil || cfg.GitHub.App.ID != "123456" {
+		t.Fatalf("app config = %+v", cfg.GitHub.App)
+	}
+	key, err := cfg.GitHub.App.ResolvePrivateKey()
+	if err != nil || !strings.Contains(string(key), "BEGIN RSA PRIVATE KEY") {
+		t.Errorf("private key not resolved: %v", err)
+	}
+}
+
+func TestGitHubAppValidation(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "app.pem")
+	_ = os.WriteFile(keyPath, []byte("-----BEGIN RSA PRIVATE KEY-----\nx\n-----END RSA PRIVATE KEY-----\n"), 0o600)
+
+	cases := map[string]string{
+		"no id":           "github:\n  app:\n    private_key_file: " + keyPath + "\n",
+		"no key":          "github:\n  app:\n    id: \"1\"\n",
+		"two key sources": "github:\n  app:\n    id: \"1\"\n    private_key_file: " + keyPath + "\n    private_key_env: SOME_VAR\n",
+		"token and app":   "github:\n  token: ghp_x\n  app:\n    id: \"1\"\n    private_key_file: " + keyPath + "\n",
+	}
+	for name, extra := range cases {
+		body := strings.Replace(minimal, "version: 1", "version: 1\n"+extra, 1)
+		if _, err := Load(write(t, body)); err == nil {
+			t.Errorf("%s should have been rejected", name)
+		}
+	}
+
+	// A key file others can read must be refused, like the token file.
+	loose := filepath.Join(dir, "loose.pem")
+	_ = os.WriteFile(loose, []byte("-----BEGIN RSA PRIVATE KEY-----\nx\n-----END RSA PRIVATE KEY-----\n"), 0o600)
+	if err := os.Chmod(loose, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := strings.Replace(minimal, "version: 1",
+		"version: 1\ngithub:\n  app:\n    id: \"1\"\n    private_key_file: "+loose+"\n", 1)
+	if _, err := Load(write(t, body)); err == nil || !strings.Contains(err.Error(), "readable by others") {
+		t.Errorf("a world-readable app key must be refused, got %v", err)
+	}
+}

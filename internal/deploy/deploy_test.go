@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -69,7 +70,7 @@ func TestDeployPrepareActivateRollback(t *testing.T) {
 	target := filepath.Join(root, "srv")
 
 	w := testWatch(t, source, target)
-	d := New(w, state, "", "", func(string, ...interface{}) {})
+	d := New(w, state, nil, "", func(string, ...interface{}) {})
 	ctx := context.Background()
 
 	if err := d.Fetch(ctx); err != nil {
@@ -141,7 +142,7 @@ func TestPruneKeepsProtectedReleases(t *testing.T) {
 	target := filepath.Join(root, "srv")
 	w := testWatch(t, source, target)
 	w.KeepReleases = 1
-	d := New(w, filepath.Join(root, "state"), "", "", func(string, ...interface{}) {})
+	d := New(w, filepath.Join(root, "state"), nil, "", func(string, ...interface{}) {})
 	ctx := context.Background()
 	if err := d.Fetch(ctx); err != nil {
 		t.Fatal(err)
@@ -168,7 +169,7 @@ func TestInplaceStrategyKeepsForeignFiles(t *testing.T) {
 	target := filepath.Join(root, "srv")
 	w := &config.Watch{Name: "test", Repo: "acme/app", CloneURL: source, Path: target,
 		Strategy: config.StrategyInplace}
-	d := New(w, filepath.Join(root, "state"), "", "", func(string, ...interface{}) {})
+	d := New(w, filepath.Join(root, "state"), nil, "", func(string, ...interface{}) {})
 	ctx := context.Background()
 	if err := d.Fetch(ctx); err != nil {
 		t.Fatal(err)
@@ -197,7 +198,7 @@ func TestAllowedAuthors(t *testing.T) {
 	root := t.TempDir()
 	w := testWatch(t, source, filepath.Join(root, "srv"))
 	w.Verify.AllowedAuthors = []string{"someone-else@example.com"}
-	d := New(w, filepath.Join(root, "state"), "", "", func(string, ...interface{}) {})
+	d := New(w, filepath.Join(root, "state"), nil, "", func(string, ...interface{}) {})
 	ctx := context.Background()
 	if err := d.Fetch(ctx); err != nil {
 		t.Fatal(err)
@@ -224,7 +225,7 @@ func TestPinSHA(t *testing.T) {
 	root := t.TempDir()
 	w := testWatch(t, source, filepath.Join(root, "srv"))
 	w.Verify.PinSHA = first
-	d := New(w, filepath.Join(root, "state"), "", "", func(string, ...interface{}) {})
+	d := New(w, filepath.Join(root, "state"), nil, "", func(string, ...interface{}) {})
 	ctx := context.Background()
 	if err := d.Fetch(ctx); err != nil {
 		t.Fatal(err)
@@ -234,5 +235,62 @@ func TestPinSHA(t *testing.T) {
 	}
 	if err := d.Verify(ctx, &gh.Target{SHA: first, Ref: "main"}); err != nil {
 		t.Errorf("the pinned revision must be accepted: %v", err)
+	}
+}
+
+// The credential must be fetched per fetch, not captured once: an installation
+// token lives an hour, and a long-running worker would otherwise keep using a
+// dead one.
+func TestFetchRunnerAsksForAFreshCredentialEveryTime(t *testing.T) {
+	calls := 0
+	w := &config.Watch{Name: "t", Repo: "acme/app", CloneURL: "https://github.com/acme/app.git",
+		Path: t.TempDir(), Strategy: config.StrategyReleases}
+	d := New(w, t.TempDir(), func(ctx context.Context, repo string) (string, error) {
+		calls++
+		if repo != "acme/app" {
+			t.Errorf("token requested for %q, want acme/app", repo)
+		}
+		return fmt.Sprintf("ghs_token_%d", calls), nil
+	}, "", func(string, ...interface{}) {})
+
+	for want := 1; want <= 3; want++ {
+		runner, err := d.fetchRunner(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if runner.token != fmt.Sprintf("ghs_token_%d", want) {
+			t.Errorf("fetch %d used %q, want the freshly issued token", want, runner.token)
+		}
+	}
+	if calls != 3 {
+		t.Errorf("token source called %d times, want once per fetch", calls)
+	}
+}
+
+func TestFetchRunnerWithoutCredential(t *testing.T) {
+	w := &config.Watch{Name: "t", Repo: "acme/app", CloneURL: "https://github.com/acme/app.git",
+		Path: t.TempDir(), Strategy: config.StrategyReleases}
+	d := New(w, t.TempDir(), nil, "", func(string, ...interface{}) {})
+	runner, err := d.fetchRunner(context.Background())
+	if err != nil {
+		t.Fatalf("a public source needs no credential: %v", err)
+	}
+	if runner.token != "" {
+		t.Errorf("token = %q, want empty", runner.token)
+	}
+}
+
+// A credential that cannot be obtained must stop the fetch with a clear error
+// rather than silently trying anonymously.
+func TestFetchRunnerReportsCredentialFailure(t *testing.T) {
+	w := &config.Watch{Name: "t", Repo: "acme/app", CloneURL: "https://github.com/acme/app.git",
+		Path: t.TempDir(), Strategy: config.StrategyReleases}
+	d := New(w, t.TempDir(), func(context.Context, string) (string, error) {
+		return "", fmt.Errorf("the app is not installed on acme/app")
+	}, "", func(string, ...interface{}) {})
+	if _, err := d.fetchRunner(context.Background()); err == nil {
+		t.Fatal("a failing token source must surface")
+	} else if !strings.Contains(err.Error(), "not installed") {
+		t.Errorf("error = %v, want the underlying reason", err)
 	}
 }

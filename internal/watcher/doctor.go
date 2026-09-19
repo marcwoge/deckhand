@@ -107,6 +107,16 @@ func (e *Engine) checkStateDir(r *report) {
 }
 
 func (e *Engine) checkGitHub(ctx context.Context, r *report) {
+	if e.app != nil {
+		cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		slug, err := e.app.Verify(cctx)
+		cancel()
+		if err != nil {
+			r.fail("github app: %v", err)
+		} else {
+			r.ok("authenticated as GitHub App @%s (installation tokens renew hourly)", slug)
+		}
+	}
 	client := e.client
 	if !e.Authenticated() {
 		if isPublicGitHub(e.cfg.GitHub.API) {
@@ -119,7 +129,16 @@ func (e *Engine) checkGitHub(ctx context.Context, r *report) {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 
-	limit, err := client.RateLimit(ctx)
+	// Hand over a repository so an app-backed credential can pick the right
+	// installation; /rate_limit itself concerns none.
+	hint := ""
+	for _, w := range e.cfg.Watches {
+		if w.IsEnabled() && w.Auth != "none" {
+			hint = w.Repo
+			break
+		}
+	}
+	limit, err := client.RateLimit(ctx, hint)
 	if err != nil {
 		r.fail("cannot reach %s: %v", e.cfg.GitHub.API, err)
 		return
@@ -204,6 +223,7 @@ func (e *Engine) checkWatch(ctx context.Context, r *report, w *config.Watch) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	// For an app this also proves the installation covers the repository.
 	private, err := e.clientFor(w).Repository(ctx, w.Repo)
 	if err != nil {
 		r.fail("%s: %v", w.Repo, err)

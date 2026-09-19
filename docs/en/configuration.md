@@ -77,6 +77,7 @@ config, it is used automatically.
 | `token` | The token inline. Works, but puts a credential in a file you might commit. |
 | `api` | API base URL. Change for GitHub Enterprise Server, e.g. `https://ghe.example.com/api/v3`. |
 | `host` | Git host used for cloning. Defaults to `github.com`. |
+| `app` | Authenticate as a GitHub App instead of with a personal access token. See [security.md](security.md#authenticating-as-a-github-app). |
 
 If none of the three token settings is given, `$DECKHAND_GITHUB_TOKEN` is used.
 
@@ -101,6 +102,21 @@ Without a token, one watch at 60 seconds would already exhaust the anonymous
 budget, so Deckhand automatically slows unauthenticated watches to a
 five-minute interval. Configuring a token is worth it even for public
 repositories.
+
+### As a GitHub App
+
+```yaml
+github:
+  app:
+    id: "123456"
+    private_key_file: /etc/deckhand/app-private-key.pem
+    # installation_id: 12345678   # omit to discover it per repository
+```
+
+The key does not expire and mints hourly installation tokens that Deckhand
+renews itself. A token and an app together are refused. The full walkthrough,
+including the trade-off, is in
+[security.md](security.md#authenticating-as-a-github-app).
 
 ## `notify`
 

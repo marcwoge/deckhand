@@ -79,6 +79,7 @@ Ist `include` nicht gesetzt und liegt neben der Konfiguration ein Verzeichnis
 | `token` | Der Token direkt in der Datei. Funktioniert, legt aber ein Geheimnis in eine Datei, die man versehentlich committet. |
 | `api` | Basis-URL der API. Für GitHub Enterprise Server ändern, z. B. `https://ghe.example.com/api/v3`. |
 | `host` | Git-Host zum Klonen. Standard `github.com`. |
+| `app` | Als GitHub App anmelden statt mit einem Personal Access Token. Siehe [security.md](security.md#anmeldung-als-github-app). |
 
 Ist keine der drei Token-Angaben gesetzt, wird `$DECKHAND_GITHUB_TOKEN`
 verwendet.
@@ -104,6 +105,21 @@ Ohne Token wäre das anonyme Budget schon mit einem einzigen Watch im
 60-Sekunden-Takt aufgebraucht. Deckhand verlangsamt unauthentifizierte Watches
 deshalb automatisch auf fünf Minuten. Ein Token lohnt sich also auch für
 öffentliche Repositories.
+
+### Als GitHub App
+
+```yaml
+github:
+  app:
+    id: "123456"
+    private_key_file: /etc/deckhand/app-private-key.pem
+    # installation_id: 12345678   # weglassen, um sie je Repository zu ermitteln
+```
+
+Der Schlüssel läuft nicht ab und erzeugt stündliche Installation-Tokens, die
+Deckhand selbst erneuert. Token und App zusammen sind nicht erlaubt. Die
+vollständige Anleitung samt Abwägung steht in
+[security.md](security.md#anmeldung-als-github-app).
 
 ## `notify`
 

@@ -27,6 +27,17 @@ github:
   token_env: DECKHAND_GITHUB_TOKEN
   # token_file: /etc/deckhand/token   # alternative, must be chmod 600
 
+  # Instead of a personal token you can authenticate as a GitHub App. Its key
+  # never expires and mints hourly installation tokens, and the identity is the
+  # app rather than a person - worth it for several machines, for an
+  # organisation, or when deployments must not break when someone leaves.
+  # Remove the token_env line above when you use this.
+  #
+  # app:
+  #   id: "123456"
+  #   private_key_file: /etc/deckhand/app-private-key.pem   # chmod 600
+  #   # installation_id: 12345678   # omit to discover it per repository
+
 # Optional. Remove this block if you do not want notifications.
 #
 # notify:

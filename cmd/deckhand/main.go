@@ -192,7 +192,7 @@ func cmdCheck(args []string) error {
 	fmt.Printf("config %s is valid\n", cfg.Path)
 	fmt.Printf("  state directory: %s\n", eng.StateDir())
 	fmt.Printf("  audit log:       %s\n", eng.AuditPath())
-	fmt.Printf("  github token:    %s\n", yesNo(eng.Authenticated()))
+	fmt.Printf("  github auth:     %s\n", eng.AuthDescription())
 	printNotifications(cfg)
 	for _, w := range eng.Watches() {
 		fmt.Printf("\n  %s\n", w.Name)

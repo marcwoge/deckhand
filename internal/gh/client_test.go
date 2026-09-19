@@ -41,7 +41,7 @@ func TestConditionalRequestsUseTheCache(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(srv.URL, "")
+	c := New(srv.URL, nil)
 	ctx := context.Background()
 	first, err := c.BranchHead(ctx, "acme/app", "main")
 	if err != nil {
@@ -77,7 +77,7 @@ func TestReleaseFiltering(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(srv.URL, "")
+	c := New(srv.URL, nil)
 	got, err := c.LatestRelease(context.Background(), "acme/app", "v*", false)
 	if err != nil {
 		t.Fatalf("latest release: %v", err)

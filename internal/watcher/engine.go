@@ -16,22 +16,27 @@ import (
 	"github.com/marcwoge/deckhand/internal/config"
 	"github.com/marcwoge/deckhand/internal/deploy"
 	"github.com/marcwoge/deckhand/internal/gh"
+	"github.com/marcwoge/deckhand/internal/ghapp"
 	"github.com/marcwoge/deckhand/internal/heartbeat"
 	"github.com/marcwoge/deckhand/internal/notify"
 )
 
 // Engine owns every watch in a config.
 type Engine struct {
-	cfg      *config.Config
-	client   *gh.Client
-	anon     *gh.Client
+	cfg    *config.Config
+	client *gh.Client
+	anon   *gh.Client
+	// app is set when authenticating as a GitHub App.
+	app      *ghapp.Authenticator
 	audit    *audit.Log
 	notifier *notify.Notifier
 	binary   string
-	token    string
-	stateDir string
-	host     string
-	logf     func(watch, format string, args ...interface{})
+	token    gh.TokenSource
+	// authDescription is what "check" and "doctor" report about the credential.
+	authDescription string
+	stateDir        string
+	host            string
+	logf            func(watch, format string, args ...interface{})
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
@@ -58,7 +63,7 @@ type Options struct {
 
 // New builds an Engine from a validated config.
 func New(cfg *config.Config, o Options) (*Engine, error) {
-	token, err := cfg.GitHub.ResolveToken()
+	token, app, description, err := buildTokenSource(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -80,17 +85,19 @@ func New(cfg *config.Config, o Options) (*Engine, error) {
 	host, _ := os.Hostname()
 	notifier, notifyErr := notify.New(cfg.Notify)
 	e := &Engine{
-		cfg:      cfg,
-		client:   gh.New(cfg.GitHub.API, token),
-		anon:     gh.New(cfg.GitHub.API, ""),
-		audit:    al,
-		notifier: notifier,
-		binary:   o.Binary,
-		token:    token,
-		stateDir: stateDir,
-		host:     host,
-		logf:     logf,
-		locks:    map[string]*sync.Mutex{},
+		cfg:             cfg,
+		client:          gh.New(cfg.GitHub.API, token),
+		anon:            gh.New(cfg.GitHub.API, nil),
+		app:             app,
+		audit:           al,
+		notifier:        notifier,
+		binary:          o.Binary,
+		token:           token,
+		stateDir:        stateDir,
+		host:            host,
+		authDescription: description,
+		logf:            logf,
+		locks:           map[string]*sync.Mutex{},
 	}
 	if notifyErr != nil {
 		// A broken notification channel is worth complaining about loudly, but
@@ -99,6 +106,41 @@ func New(cfg *config.Config, o Options) (*Engine, error) {
 	}
 	return e, nil
 }
+
+// buildTokenSource turns the configured credentials into a token source: a
+// GitHub App if one is configured, otherwise a personal token, otherwise
+// nothing (which is valid for public repositories).
+func buildTokenSource(cfg *config.Config) (gh.TokenSource, *ghapp.Authenticator, string, error) {
+	if app := cfg.GitHub.App; app != nil {
+		key, err := app.ResolvePrivateKey()
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("github.app: %w", err)
+		}
+		auth, err := ghapp.New(cfg.GitHub.API, app.ID, key, app.InstallationID)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("github.app: %w", err)
+		}
+		where := "installation discovered per repository"
+		if app.InstallationID != 0 {
+			where = fmt.Sprintf("installation %d", app.InstallationID)
+		}
+		return auth.TokenFor, auth, fmt.Sprintf("GitHub App %s (%s)", app.ID, where), nil
+	}
+	token, err := cfg.GitHub.ResolveToken()
+	if err != nil {
+		return nil, nil, "", err
+	}
+	if token == "" {
+		return nil, nil, "none", nil
+	}
+	return gh.StaticToken(token), nil, "personal access token", nil
+}
+
+// AuthDescription describes the credential in use, for check and doctor.
+func (e *Engine) AuthDescription() string { return e.authDescription }
+
+// App returns the app authenticator when one is configured.
+func (e *Engine) App() *ghapp.Authenticator { return e.app }
 
 // DefaultStateDir picks a per-user or system-wide location for state and logs.
 func DefaultStateDir() string {
@@ -120,8 +162,8 @@ func (e *Engine) StateDir() string { return e.stateDir }
 // AuditPath returns the audit log location.
 func (e *Engine) AuditPath() string { return e.audit.Path() }
 
-// Authenticated reports whether a GitHub token was found.
-func (e *Engine) Authenticated() bool { return e.token != "" }
+// Authenticated reports whether a credential is configured.
+func (e *Engine) Authenticated() bool { return e.token != nil }
 
 func (e *Engine) watchStateDir(w *config.Watch) string {
 	return filepath.Join(e.stateDir, "watches", w.Name)
@@ -275,7 +317,7 @@ func (e *Engine) Reload(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("configuration not reloaded, keeping the running one: %w", err)
 	}
-	token, err := newCfg.GitHub.ResolveToken()
+	token, app, description, err := buildTokenSource(newCfg)
 	if err != nil {
 		return fmt.Errorf("configuration not reloaded, keeping the running one: %w", err)
 	}
@@ -289,8 +331,10 @@ func (e *Engine) Reload(ctx context.Context) error {
 
 	e.cfg = newCfg
 	e.token = token
+	e.app = app
+	e.authDescription = description
 	e.client = gh.New(newCfg.GitHub.API, token)
-	e.anon = gh.New(newCfg.GitHub.API, "")
+	e.anon = gh.New(newCfg.GitHub.API, nil)
 	e.notifier = notifier
 
 	if err := e.start(ctx); err != nil {

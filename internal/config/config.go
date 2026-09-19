@@ -68,6 +68,41 @@ type GitHub struct {
 	API       string `yaml:"api"`
 	// Host is the git host used for cloning; change it for GitHub Enterprise.
 	Host string `yaml:"host"`
+
+	// App authenticates as a GitHub App instead of with a personal token.
+	App *GitHubApp `yaml:"app"`
+}
+
+// GitHubApp authenticates as a GitHub App. Its private key mints installation
+// tokens that last an hour and renew themselves, so nothing expires the way a
+// personal access token does - and the identity is the app, not a person.
+type GitHubApp struct {
+	// ID is the app id (the numeric one, or its client id).
+	ID string `yaml:"id"`
+
+	// InstallationID pins every repository to one installation. Leave it unset
+	// to have the installation discovered per repository, which is what you
+	// want when the app is installed in more than one account.
+	InstallationID int64 `yaml:"installation_id"`
+
+	PrivateKey     string `yaml:"private_key"`
+	PrivateKeyFile string `yaml:"private_key_file"`
+	PrivateKeyEnv  string `yaml:"private_key_env"`
+}
+
+// ResolvePrivateKey reads the PEM key from its configured source, refusing one
+// that others can read.
+func (a *GitHubApp) ResolvePrivateKey() ([]byte, error) {
+	key, err := resolveSecret(a.PrivateKey, a.PrivateKeyEnv, a.PrivateKeyFile)
+	if err != nil {
+		return nil, err
+	}
+	if key == "" {
+		return nil, fmt.Errorf("no private key configured")
+	}
+	// A key pasted into YAML or an environment variable usually loses its
+	// newlines; restore them so the PEM decoder can read it.
+	return []byte(strings.ReplaceAll(key, "\\n", "\n")), nil
 }
 
 // Notify configures outbound notifications.
@@ -390,6 +425,33 @@ func (c *Config) normalise() error {
 	c.GitHub.API = strings.TrimRight(c.GitHub.API, "/")
 	if c.GitHub.Host == "" {
 		c.GitHub.Host = "github.com"
+	}
+	if app := c.GitHub.App; app != nil {
+		if strings.TrimSpace(app.ID) == "" {
+			return fmt.Errorf("github.app needs an id (Settings -> Developer settings -> GitHub Apps)")
+		}
+		sources := 0
+		for _, set := range []string{app.PrivateKey, app.PrivateKeyFile, app.PrivateKeyEnv} {
+			if set != "" {
+				sources++
+			}
+		}
+		switch sources {
+		case 0:
+			return fmt.Errorf("github.app needs private_key_file (preferred), private_key_env or private_key")
+		case 1:
+		default:
+			return fmt.Errorf("github.app has several private key sources; pick one")
+		}
+		if _, err := app.ResolvePrivateKey(); err != nil {
+			return fmt.Errorf("github.app: %w", err)
+		}
+		if c.GitHub.Token != "" || c.GitHub.TokenEnv != "" || c.GitHub.TokenFile != "" {
+			return fmt.Errorf("github has both a personal token and an app configured; pick one")
+		}
+		if app.InstallationID < 0 {
+			return fmt.Errorf("github.app installation_id cannot be negative")
+		}
 	}
 	if c.Notify.Format == "" {
 		c.Notify.Format = "json"

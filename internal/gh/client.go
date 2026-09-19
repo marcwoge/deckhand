@@ -18,10 +18,24 @@ import (
 
 const userAgent = "deckhand"
 
+// TokenSource returns a credential for a repository. It is called before every
+// request, so a source backed by a GitHub App can hand out a freshly renewed
+// installation token without anything else having to know.
+type TokenSource func(ctx context.Context, repo string) (string, error)
+
+// StaticToken wraps a fixed credential, which is how a personal access token
+// or anonymous access is expressed.
+func StaticToken(token string) TokenSource {
+	if token == "" {
+		return nil
+	}
+	return func(context.Context, string) (string, error) { return token, nil }
+}
+
 // Client talks to the GitHub REST API.
 type Client struct {
 	api   string
-	token string
+	token TokenSource
 	http  *http.Client
 
 	mu    sync.Mutex
@@ -35,9 +49,9 @@ type cacheEntry struct {
 	body []byte
 }
 
-// New returns a client. An empty token means unauthenticated access, which
+// New returns a client. A nil token source means unauthenticated access, which
 // works for public repositories but is limited to 60 requests per hour.
-func New(api, token string) *Client {
+func New(api string, token TokenSource) *Client {
 	return &Client{
 		api:   strings.TrimRight(api, "/"),
 		token: token,
@@ -46,8 +60,8 @@ func New(api, token string) *Client {
 	}
 }
 
-// Authenticated reports whether a token is in use.
-func (c *Client) Authenticated() bool { return c.token != "" }
+// Authenticated reports whether a credential is in use.
+func (c *Client) Authenticated() bool { return c.token != nil }
 
 // ErrRateLimited is returned when the primary rate limit is exhausted.
 type ErrRateLimited struct{ Reset time.Time }
@@ -56,8 +70,10 @@ func (e *ErrRateLimited) Error() string {
 	return fmt.Sprintf("GitHub rate limit exhausted, resets at %s", e.Reset.Format(time.RFC3339))
 }
 
-// get performs a conditional GET and decodes the (possibly cached) body.
-func (c *Client) get(ctx context.Context, endpoint string, out interface{}) error {
+// get performs a conditional GET and decodes the (possibly cached) body. repo
+// is "owner/name" where the request concerns one, so the token source can pick
+// the right credential; it may be empty for endpoints that concern none.
+func (c *Client) get(ctx context.Context, repo, endpoint string, out interface{}) error {
 	c.mu.Lock()
 	if !c.rateReset.IsZero() && time.Now().Before(c.rateReset) {
 		reset := c.rateReset
@@ -74,8 +90,14 @@ func (c *Client) get(ctx context.Context, endpoint string, out interface{}) erro
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	req.Header.Set("User-Agent", userAgent)
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
+	if c.token != nil {
+		token, err := c.token(ctx, repo)
+		if err != nil {
+			return fmt.Errorf("credential for %s: %w", endpoint, err)
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
 	}
 	if entry != nil && entry.etag != "" {
 		req.Header.Set("If-None-Match", entry.etag)
@@ -130,7 +152,7 @@ func (c *Client) get(ctx context.Context, endpoint string, out interface{}) erro
 	}
 }
 
-// redactURL strips any token that a transport error might have echoed.
+// redactURL strips any credential that a transport error might have echoed.
 func redactURL(msg string) error {
 	if i := strings.Index(msg, "Bearer "); i >= 0 {
 		msg = msg[:i] + "Bearer [redacted]"
@@ -160,7 +182,7 @@ type Release struct {
 // LatestRelease returns the newest published release matching the filters.
 func (c *Client) LatestRelease(ctx context.Context, repo, tagGlob string, allowPrerelease bool) (*Target, error) {
 	var releases []Release
-	if err := c.get(ctx, "/repos/"+repo+"/releases?per_page=30", &releases); err != nil {
+	if err := c.get(ctx, repo, "/repos/"+repo+"/releases?per_page=30", &releases); err != nil {
 		return nil, err
 	}
 	var best *Release
@@ -204,7 +226,7 @@ func (c *Client) LatestTag(ctx context.Context, repo, glob string) (*Target, err
 			SHA string `json:"sha"`
 		} `json:"commit"`
 	}
-	if err := c.get(ctx, "/repos/"+repo+"/tags?per_page=100", &tags); err != nil {
+	if err := c.get(ctx, repo, "/repos/"+repo+"/tags?per_page=100", &tags); err != nil {
 		return nil, err
 	}
 	best := -1
@@ -240,7 +262,7 @@ func (c *Client) BranchHead(ctx context.Context, repo, branch string) (*Target, 
 			Message string `json:"message"`
 		} `json:"commit"`
 	}
-	if err := c.get(ctx, "/repos/"+repo+"/commits/"+branch, &commit); err != nil {
+	if err := c.get(ctx, repo, "/repos/"+repo+"/commits/"+branch, &commit); err != nil {
 		return nil, err
 	}
 	subject := commit.Commit.Message
@@ -258,7 +280,7 @@ func (c *Client) resolveRef(ctx context.Context, repo, ref string) (string, erro
 			Type string `json:"type"`
 		} `json:"object"`
 	}
-	if err := c.get(ctx, "/repos/"+repo+"/git/ref/"+ref, &obj); err != nil {
+	if err := c.get(ctx, repo, "/repos/"+repo+"/git/ref/"+ref, &obj); err != nil {
 		return "", err
 	}
 	if obj.Object.Type != "tag" {
@@ -269,7 +291,7 @@ func (c *Client) resolveRef(ctx context.Context, repo, ref string) (string, erro
 			SHA string `json:"sha"`
 		} `json:"object"`
 	}
-	if err := c.get(ctx, "/repos/"+repo+"/git/tags/"+obj.Object.SHA, &tag); err != nil {
+	if err := c.get(ctx, repo, "/repos/"+repo+"/git/tags/"+obj.Object.SHA, &tag); err != nil {
 		return "", err
 	}
 	return tag.Object.SHA, nil
@@ -317,9 +339,10 @@ type RateLimitStatus struct {
 	Reset     time.Time
 }
 
-// RateLimit reports the current rate limit. The endpoint itself is free, and
-// it doubles as a way to check that a token is valid.
-func (c *Client) RateLimit(ctx context.Context) (*RateLimitStatus, error) {
+// RateLimit reports the current rate limit. The endpoint itself is free, and it
+// doubles as a way to check that a credential is valid. hintRepo concerns no
+// endpoint but lets an app-backed token source pick an installation.
+func (c *Client) RateLimit(ctx context.Context, hintRepo string) (*RateLimitStatus, error) {
 	var body struct {
 		Resources struct {
 			Core struct {
@@ -329,7 +352,7 @@ func (c *Client) RateLimit(ctx context.Context) (*RateLimitStatus, error) {
 			} `json:"core"`
 		} `json:"resources"`
 	}
-	if err := c.get(ctx, "/rate_limit", &body); err != nil {
+	if err := c.get(ctx, hintRepo, "/rate_limit", &body); err != nil {
 		return nil, err
 	}
 	core := body.Resources.Core
@@ -344,7 +367,7 @@ func (c *Client) Repository(ctx context.Context, repo string) (private bool, err
 		Private  bool `json:"private"`
 		Archived bool `json:"archived"`
 	}
-	if err := c.get(ctx, "/repos/"+repo, &body); err != nil {
+	if err := c.get(ctx, repo, "/repos/"+repo, &body); err != nil {
 		return false, err
 	}
 	return body.Private, nil

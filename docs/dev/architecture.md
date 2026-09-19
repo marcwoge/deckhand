@@ -7,6 +7,7 @@ small enough to read in an afternoon; this page is the map.
 cmd/deckhand/          CLI: subcommands, flag parsing, the git askpass helper
 internal/config/       YAML types, validation, time-window parsing
 internal/gh/           GitHub REST client with ETag caching
+internal/ghapp/        GitHub App: JWT assertions and installation tokens
 internal/deploy/       git operations, release directories, links, state
 internal/runner/       command execution, timeouts, process groups
 internal/health/       post-deploy checks
@@ -102,11 +103,27 @@ If you change any of these, say so explicitly in the pull request:
 | `deploy.gitEnv` | The token reaches git via the environment, not the command line |
 | `config.checkPermissions` | Refuses a writable config |
 | `config.ResolveToken` | Refuses a world-readable token file |
+| `config.GitHubApp.ResolvePrivateKey` | Refuses a world-readable app key |
+| `ghapp.Authenticator` | Tokens are minted per installation and renewed before expiry; the private key never leaves the process |
 | `config.loadIncludes` | Included files get the same permission check as the main one |
 | `deploy.AcquireLock` | Two processes never deploy the same path at once |
 | `main.warnings` | Warns when a command lives inside the deployed tree |
 | `watcher.handleUpdate` | Telegram commands are accepted only from the configured chat, and only when recent |
 | `notify.post` | Credentials go in an Authorization header, never in a URL, and never into an error message |
+
+## Credentials
+
+`gh.TokenSource` is `func(ctx, repo) (string, error)`, asked before every API
+request and every fetch rather than resolved once at startup. A personal token
+becomes a closure returning a constant; a GitHub App becomes
+`ghapp.Authenticator.TokenFor`, which mints an installation token, caches it per
+installation and renews it ten minutes before expiry. Nothing downstream knows
+which it is.
+
+Two details worth keeping: a failed renewal falls back to a token that is still
+valid, so a hiccup at GitHub does not fail a deployment; and endpoints with no
+repository (`/rate_limit`) reuse any known installation, because there is
+nothing to derive one from.
 
 ## Reload
 

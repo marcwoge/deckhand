@@ -55,6 +55,7 @@ with signed checksums and build provenance.
 | `deckhand init` writes a commented starter config | ✅ |
 | `deckhand check` validates and warns about risky settings | ✅ |
 | Token from environment variable, file or (discouraged) inline | ✅ |
+| GitHub App authentication with self-renewing installation tokens | ✅ |
 | GitHub Enterprise Server support (`github.api`, `github.host`) | ✅ |
 | Split configuration across an include directory | ✅ |
 

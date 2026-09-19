@@ -48,6 +48,90 @@ github:
 Deckhand refuses to read a `token_file` that others can read, and refuses to
 start at all with a config that group or others can write.
 
+## Authenticating as a GitHub App
+
+A personal access token is the quickest way to start, and for one machine with
+read access it is perfectly fine. A GitHub App is worth the extra setup when:
+
+* **Nothing should expire.** A fine-grained token lasts a year at most, and when
+  it lapses every deployment stops. An app's private key does not expire; it
+  mints installation tokens that live one hour and renew themselves.
+* **Deployments should not hang on a person.** A token belongs to your account.
+  An app is its own identity, so deployments survive someone leaving.
+* **Several machines or accounts are involved.** One app can be installed in
+  several accounts, and its rate limit is per installation rather than shared
+  with everything else you do.
+
+The trade is real and worth stating: the private key sits on the machine
+permanently and never expires, and it covers every installation of the app. A
+stolen `Contents: Read` token is worth less than a stolen app key. Treat the key
+like an SSH host key — owned by the service account, mode 0600, never in a
+repository.
+
+### Creating the app
+
+1. **Settings → Developer settings → GitHub Apps → New GitHub App**
+   (for an organisation: its settings, same path).
+2. Name it something recognisable — it appears in the audit log. Homepage URL
+   can be your repository.
+3. Under **Webhook**, untick *Active*. Deckhand polls; it needs no webhook.
+4. **Repository permissions → Contents: Read-only.** Nothing else. Not metadata
+   write, not actions, not workflows.
+5. **Where can this GitHub App be installed** → *Only on this account*, unless
+   you have reason to share it.
+6. Create it, then note the **App ID** at the top of the page.
+7. **Generate a private key** at the bottom. The `.pem` downloads once — there
+   is no second chance, only a new key.
+8. **Install App** in the left sidebar → choose the account → *Only select
+   repositories* → pick the ones Deckhand will watch.
+
+### Configuring it
+
+```bash
+sudo install -m 600 -o deckhand ~/Downloads/your-app.2026-09-19.private-key.pem \
+  /etc/deckhand/app-private-key.pem
+```
+
+```yaml
+github:
+  app:
+    id: "123456"
+    private_key_file: /etc/deckhand/app-private-key.pem
+    # installation_id: 12345678   # optional, see below
+```
+
+Remove `token_env` / `token_file` when you switch — Deckhand refuses a config
+carrying both, rather than silently picking one.
+
+| Key | Meaning |
+|---|---|
+| `id` | The App ID from the app's settings page. Its client ID also works. |
+| `private_key_file` | Path to the `.pem`. Must not be readable by others. |
+| `private_key_env` | The key's contents in an environment variable, for setups that inject secrets. Literal `\n` sequences are accepted. |
+| `private_key` | Inline. Works, but puts the key in a file you might commit. |
+| `installation_id` | Pins every repository to one installation. Leave it out and Deckhand asks GitHub which installation covers each repository, which is what you want when the app is installed in more than one account. |
+
+Check it before starting the service:
+
+```bash
+deckhand check     # says: github auth: GitHub App 123456 (...)
+deckhand doctor    # confirms the app against GitHub and names it
+```
+
+`doctor` reports the app's slug (`authenticated as GitHub App @your-app`), and
+because it also reads each repository it proves the installation actually covers
+them — the mistake people make is installing the app but forgetting to add a
+repository.
+
+### What Deckhand does with it
+
+Nothing you have to manage. Before each API request and each fetch it asks for a
+token, renewing when less than ten minutes remain. Tokens are cached per
+installation, and if a renewal fails while the current token is still valid, the
+deployment proceeds on the old one rather than failing over a hiccup. The token
+reaches git through the askpass helper, exactly as a personal token does, so it
+never appears in a process list or in `.git/config`.
+
 ### 2. A user that can only deploy
 
 ```bash

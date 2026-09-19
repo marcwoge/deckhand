@@ -58,10 +58,11 @@ func (e *Engine) deployTarget(ctx context.Context, w *config.Watch, t *gh.Target
 	st.LastAttempt = time.Now().UTC()
 
 	log := func(format string, args ...interface{}) { e.logf(w.Name, format, args...) }
-	d := deploy.New(w, e.watchStateDir(w), e.token, e.binary, log)
+	token := e.token
 	if w.Auth == "none" {
-		d = deploy.New(w, e.watchStateDir(w), "", e.binary, log)
+		token = nil
 	}
+	d := deploy.New(w, e.watchStateDir(w), token, e.binary, log)
 
 	start := time.Now()
 	log("deploying %s %s (%s)", t.Kind, t.Ref, deploy.Short(t.SHA))
@@ -249,7 +250,7 @@ func (e *Engine) Rollback(ctx context.Context, w *config.Watch) error {
 	log := func(format string, args ...interface{}) { e.logf(w.Name, format, args...) }
 	token := e.token
 	if w.Auth == "none" {
-		token = ""
+		token = nil
 	}
 	d := deploy.New(w, e.watchStateDir(w), token, e.binary, log)
 	if err := e.rollbackTo(ctx, w, d, st, log, st.PreviousRelease, st.PreviousSHA); err != nil {

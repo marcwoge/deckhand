@@ -51,6 +51,93 @@ Deckhand weigert sich, eine `token_file` zu lesen, die andere lesen können, und
 startet gar nicht erst mit einer Konfiguration, die Gruppe oder andere
 beschreiben dürfen.
 
+## Anmeldung als GitHub App
+
+Ein Personal Access Token ist der schnellste Weg, und für eine Maschine mit
+Lesezugriff völlig in Ordnung. Eine GitHub App lohnt den Mehraufwand, wenn:
+
+* **Nichts ablaufen soll.** Ein fine-grained Token hält höchstens ein Jahr, und
+  wenn er verfällt, stehen alle Deployments. Der private Schlüssel einer App
+  läuft nicht ab; er erzeugt Installation-Tokens, die eine Stunde leben und sich
+  selbst erneuern.
+* **Deployments nicht an einer Person hängen sollen.** Ein Token gehört deinem
+  Konto. Eine App ist eine eigene Identität und übersteht es, wenn jemand geht.
+* **Mehrere Maschinen oder Konten im Spiel sind.** Eine App kann in mehreren
+  Konten installiert sein, und ihr Rate-Limit gilt je Installation statt geteilt
+  mit allem anderen, was du tust.
+
+Der Preis ist echt und gehört genannt: Der private Schlüssel liegt dauerhaft auf
+der Maschine, läuft nie ab und gilt für jede Installation der App. Ein
+gestohlener `Contents: Read`-Token ist weniger wert als ein gestohlener
+App-Schlüssel. Behandle ihn wie einen SSH-Host-Key — Eigentümer ist der
+Dienstbenutzer, Rechte 0600, niemals in einem Repository.
+
+### App anlegen
+
+1. **Settings → Developer settings → GitHub Apps → New GitHub App**
+   (für eine Organisation: deren Einstellungen, gleicher Pfad).
+2. Gib ihr einen erkennbaren Namen — er erscheint im Audit-Log. Als Homepage-URL
+   genügt dein Repository.
+3. Unter **Webhook** den Haken bei *Active* entfernen. Deckhand fragt ab und
+   braucht keinen Webhook.
+4. **Repository permissions → Contents: Read-only.** Sonst nichts. Kein
+   Metadata-Write, keine Actions, keine Workflows.
+5. **Where can this GitHub App be installed** → *Only on this account*, sofern du
+   keinen Grund hast, sie zu teilen.
+6. Anlegen, dann die **App ID** oben auf der Seite notieren.
+7. Unten **Generate a private key**. Die `.pem` wird genau einmal
+   heruntergeladen — es gibt keine zweite Gelegenheit, nur einen neuen Schlüssel.
+8. Links **Install App** → Konto wählen → *Only select repositories* → die
+   Repositories auswählen, die Deckhand beobachten soll.
+
+### Einrichten
+
+```bash
+sudo install -m 600 -o deckhand ~/Downloads/deine-app.2026-09-19.private-key.pem \
+  /etc/deckhand/app-private-key.pem
+```
+
+```yaml
+github:
+  app:
+    id: "123456"
+    private_key_file: /etc/deckhand/app-private-key.pem
+    # installation_id: 12345678   # optional, siehe unten
+```
+
+Entferne `token_env` / `token_file` beim Umstellen — Deckhand weist eine
+Konfiguration mit beidem zurück, statt stillschweigend eines auszuwählen.
+
+| Schlüssel | Bedeutung |
+|---|---|
+| `id` | Die App ID aus den Einstellungen der App. Ihre Client ID funktioniert auch. |
+| `private_key_file` | Pfad zur `.pem`. Darf für andere nicht lesbar sein. |
+| `private_key_env` | Der Schlüsselinhalt in einer Umgebungsvariable, für Umgebungen, die Geheimnisse einspeisen. Literale `\n`-Folgen werden akzeptiert. |
+| `private_key` | Direkt in der Datei. Funktioniert, legt den Schlüssel aber in eine Datei, die man versehentlich committet. |
+| `installation_id` | Nagelt alle Repositories auf eine Installation fest. Lass es weg, dann fragt Deckhand GitHub, welche Installation welches Repository abdeckt — das willst du, wenn die App in mehreren Konten installiert ist. |
+
+Vor dem Start des Dienstes prüfen:
+
+```bash
+deckhand check     # zeigt: github auth: GitHub App 123456 (...)
+deckhand doctor    # bestätigt die App bei GitHub und nennt ihren Namen
+```
+
+`doctor` nennt den Slug der App (`authenticated as GitHub App @deine-app`), und
+weil es zusätzlich jedes Repository liest, beweist es, dass die Installation sie
+wirklich abdeckt — der häufigste Fehler ist, die App zu installieren und dabei
+ein Repository zu vergessen.
+
+### Was Deckhand damit macht
+
+Nichts, das du verwalten musst. Vor jeder API-Anfrage und jedem Fetch holt es
+einen Token und erneuert ihn, sobald weniger als zehn Minuten übrig sind. Tokens
+werden je Installation zwischengespeichert, und scheitert eine Erneuerung,
+während der aktuelle Token noch gilt, läuft das Deployment mit dem alten weiter
+statt an einem Schluckauf zu scheitern. Der Token erreicht git über den
+Askpass-Helfer, genau wie ein Personal Access Token — er erscheint also nie in
+einer Prozessliste oder in `.git/config`.
+
 ### 2. Ein Benutzer, der nur deployen kann
 
 ```bash
