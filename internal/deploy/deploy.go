@@ -70,7 +70,7 @@ func (d *Deployer) currentLink() string { return filepath.Join(d.Watch.Path, "cu
 
 // WorkDir is the directory the run commands are executed in.
 func (d *Deployer) WorkDir() string {
-	if d.Watch.Strategy == config.StrategyInplace {
+	if !d.Watch.NeedsCheckout() || d.Watch.Strategy == config.StrategyInplace {
 		return d.Watch.Path
 	}
 	return d.currentLink()
@@ -351,6 +351,15 @@ func anyAllowed(allowed []string, identities ...string) bool {
 }
 
 func short(sha string) string {
+	// An image digest carries an algorithm prefix; abbreviating the whole string
+	// would leave "sha256:a", which identifies nothing. Shorten the hash
+	// instead, the way docker does.
+	if algorithm, hash, ok := strings.Cut(sha, ":"); ok {
+		if len(hash) > 12 {
+			return algorithm + ":" + hash[:12]
+		}
+		return sha
+	}
 	if len(sha) > 8 {
 		return sha[:8]
 	}

@@ -117,6 +117,33 @@ watch:
       - ["systemctl", "--user", "restart", "api-staging"]
 
   # ---------------------------------------------------------------------
+  # Deploy an image built somewhere else, so this machine needs no build
+  # toolchain. See docs/en/building-elsewhere.md.
+  # ---------------------------------------------------------------------
+  # - name: shop-from-registry
+  #   trigger:
+  #     type: image
+  #     image: ghcr.io/your-name/shop
+  #     tag: latest
+  #   path: /srv/shop            # a directory you maintain, holding compose.yaml
+  #   run:
+  #     - ["docker", "compose", "pull"]
+  #     - ["docker", "compose", "up", "-d"]
+  #   health:
+  #     http: http://localhost:8080/healthz
+  #
+  # In that compose.yaml, pin the digest so rollback works:
+  #   services:
+  #     app:
+  #       image: ${DECKHAND_IMAGE_REF}
+  #
+  # For a private image add credentials at the top level:
+  # registry:
+  #   ghcr.io:
+  #     username: your-name
+  #     password_env: DECKHAND_GHCR_TOKEN
+
+  # ---------------------------------------------------------------------
   # A public repository you do not control: no token, signature required.
   # ---------------------------------------------------------------------
   # - name: upstream-tool

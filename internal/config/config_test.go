@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -382,5 +383,77 @@ func TestGitHubAppValidation(t *testing.T) {
 		"version: 1\ngithub:\n  app:\n    id: \"1\"\n    private_key_file: "+loose+"\n", 1)
 	if _, err := Load(write(t, body)); err == nil || !strings.Contains(err.Error(), "readable by others") {
 		t.Errorf("a world-readable app key must be refused, got %v", err)
+	}
+}
+
+func TestImageTriggerConfig(t *testing.T) {
+	body := `
+version: 1
+registry:
+  ghcr.io:
+    username: marcwoge
+    password_env: DECKHAND_GHCR_TOKEN
+watch:
+  - name: shop
+    trigger:
+      type: image
+      image: ghcr.io/marcwoge/shop
+    path: /srv/shop
+    run:
+      - ["docker", "compose", "up", "-d"]
+`
+	cfg, err := Load(write(t, body))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	w := cfg.Watches[0]
+	if w.Trigger.Tag != "latest" {
+		t.Errorf("tag = %q, want the latest default", w.Trigger.Tag)
+	}
+	if w.NeedsCheckout() {
+		t.Error("an image trigger must not check anything out")
+	}
+	if w.Subject() != "ghcr.io/marcwoge/shop" {
+		t.Errorf("Subject() = %q", w.Subject())
+	}
+	if cfg.Registry["ghcr.io"].Username != "marcwoge" {
+		t.Errorf("registry credentials not parsed: %+v", cfg.Registry)
+	}
+}
+
+func TestImageTriggerValidation(t *testing.T) {
+	base := `
+version: 1
+watch:
+  - name: shop
+    trigger:
+      type: image
+      image: ghcr.io/marcwoge/shop
+%s    path: /srv/shop
+    run:
+      - ["true"]
+`
+	cases := map[string]string{
+		"with repo":         "    repo: acme/shop\n",
+		"tag and tag_match": "      tag: latest\n      tag_match: \"v*\"\n",
+		"with branch":       "      branch: main\n",
+		"with shared":       "    shared: [\".env\"]\n",
+		"with strategy":     "    strategy: releases\n",
+	}
+	for name, extra := range cases {
+		if _, err := Load(write(t, fmt.Sprintf(base, extra))); err == nil {
+			t.Errorf("%s should have been rejected", name)
+		}
+	}
+	// A digest-pinned image defeats the point of watching.
+	pinned := strings.Replace(fmt.Sprintf(base, ""), "ghcr.io/marcwoge/shop",
+		"ghcr.io/marcwoge/shop@sha256:abc", 1)
+	if _, err := Load(write(t, pinned)); err == nil {
+		t.Error("a digest-pinned image should have been rejected")
+	}
+	// An image trigger without an image is meaningless.
+	noImage := strings.Replace(fmt.Sprintf(base, ""), "      image: ghcr.io/marcwoge/shop\n", "", 1)
+	if _, err := Load(write(t, noImage)); err == nil {
+		t.Error("an image trigger without an image should have been rejected")
 	}
 }

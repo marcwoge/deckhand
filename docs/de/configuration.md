@@ -170,6 +170,20 @@ notify:
 Kanäle sind unabhängig: Ein defekter Endpunkt hält weder die anderen auf noch
 beeinflusst er das Deployment.
 
+## `registry`
+
+Pull-Zugangsdaten je Registry-Host, nur für Image-Trigger nötig — und auch dann
+nur für private Images.
+
+```yaml
+registry:
+  ghcr.io:
+    username: dein-github-name
+    password_env: DECKHAND_GHCR_TOKEN     # oder password_file / password
+```
+
+Siehe [building-elsewhere.md](building-elsewhere.md#registry-zugangsdaten).
+
 ## `heartbeat`
 
 Optional, aber empfohlen. Jeder Benachrichtigungskanal meldet sich nur, wenn
@@ -207,8 +221,10 @@ Jeder Eintrag beschreibt ein Repository.
 
 ```yaml
 trigger:
-  type: release        # release | branch | tag
+  type: release        # release | branch | tag | image
   branch: main         # Pflicht bei type: branch
+  image: ghcr.io/du/app # Pflicht bei type: image, siehe building-elsewhere.md
+  tag: latest          # bei type: image
   tag_match: "v*"      # Glob-Muster, für release und tag
   prerelease: false    # Pre-Releases einbeziehen (nur release)
 ```

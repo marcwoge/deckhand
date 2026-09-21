@@ -20,16 +20,19 @@ const (
 	TriggerRelease = "release"
 	TriggerBranch  = "branch"
 	TriggerTag     = "tag"
+	TriggerImage   = "image"
 )
 
 // Config is the whole deckhand.yaml file.
 type Config struct {
-	Version   int       `yaml:"version"`
-	Defaults  Defaults  `yaml:"defaults"`
-	GitHub    GitHub    `yaml:"github"`
-	Notify    Notify    `yaml:"notify"`
-	Heartbeat Heartbeat `yaml:"heartbeat"`
-	Watches   []*Watch  `yaml:"watch"`
+	Version  int      `yaml:"version"`
+	Defaults Defaults `yaml:"defaults"`
+	GitHub   GitHub   `yaml:"github"`
+	// Registry holds credentials per registry host, keyed by host name.
+	Registry  map[string]*RegistryAuth `yaml:"registry"`
+	Notify    Notify                   `yaml:"notify"`
+	Heartbeat Heartbeat                `yaml:"heartbeat"`
+	Watches   []*Watch                 `yaml:"watch"`
 
 	// Include names a directory of additional *.yaml files, each of which may
 	// contribute watch entries. Defaults to "<config>.d" when that exists.
@@ -191,6 +194,25 @@ type Trigger struct {
 	Branch     string `yaml:"branch"`
 	TagMatch   string `yaml:"tag_match"`
 	Prerelease bool   `yaml:"prerelease"`
+
+	// Image and Tag apply to the image trigger: the container image to watch,
+	// and which tag of it. A new digest under the same tag counts as a change,
+	// which is what a rebuilt "latest" is.
+	Image string `yaml:"image"`
+	Tag   string `yaml:"tag"`
+}
+
+// RegistryAuth is the pull credential for one registry host.
+type RegistryAuth struct {
+	Username     string `yaml:"username"`
+	Password     string `yaml:"password"`
+	PasswordEnv  string `yaml:"password_env"`
+	PasswordFile string `yaml:"password_file"`
+}
+
+// ResolvePassword reads the registry credential from its configured source.
+func (r *RegistryAuth) ResolvePassword() (string, error) {
+	return resolveSecret(r.Password, r.PasswordEnv, r.PasswordFile)
 }
 
 // Verify holds optional supply-chain checks.
@@ -465,6 +487,14 @@ func (c *Config) normalise() error {
 	if err := c.Heartbeat.normalise(); err != nil {
 		return fmt.Errorf("heartbeat: %w", err)
 	}
+	for host, auth := range c.Registry {
+		if host == "" {
+			return fmt.Errorf("registry entry without a host name")
+		}
+		if _, err := auth.ResolvePassword(); err != nil {
+			return fmt.Errorf("registry %s: %w", host, err)
+		}
+	}
 	if len(c.Watches) == 0 {
 		return fmt.Errorf("no watch entries configured")
 	}
@@ -486,10 +516,31 @@ func (c *Config) normalise() error {
 }
 
 func (w *Watch) normalise(c *Config) error {
-	if !strings.Contains(w.Repo, "/") || strings.Count(w.Repo, "/") != 1 {
+	// An image trigger watches a registry, so there is no repository involved.
+	if w.Trigger.Type == TriggerImage {
+		if w.Repo != "" {
+			return fmt.Errorf("an image trigger watches a registry; remove \"repo\"")
+		}
+		if w.Trigger.Image == "" {
+			return fmt.Errorf("trigger type \"image\" needs an image, e.g. ghcr.io/you/app")
+		}
+		if strings.Contains(w.Trigger.Image, "@") {
+			return fmt.Errorf("image %q already pins a digest; give a tag and deckhand "+
+				"resolves the digest itself", w.Trigger.Image)
+		}
+		if w.Trigger.Tag == "" && w.Trigger.TagMatch == "" {
+			w.Trigger.Tag = "latest"
+		}
+		if w.Trigger.Tag != "" && w.Trigger.TagMatch != "" {
+			return fmt.Errorf("an image trigger takes either \"tag\" or \"tag_match\", not both")
+		}
+		if w.Trigger.Branch != "" {
+			return fmt.Errorf("an image trigger has no branch")
+		}
+	} else if !strings.Contains(w.Repo, "/") || strings.Count(w.Repo, "/") != 1 {
 		return fmt.Errorf("repo must be \"owner/name\", got %q", w.Repo)
 	}
-	if w.CloneURL == "" {
+	if w.CloneURL == "" && w.Repo != "" {
 		w.CloneURL = fmt.Sprintf("https://%s/%s.git", c.GitHub.Host, w.Repo)
 	}
 	if w.Auth == "" {
@@ -508,6 +559,7 @@ func (w *Watch) normalise(c *Config) error {
 	w.Path = abs
 
 	switch w.Trigger.Type {
+	case TriggerImage:
 	case TriggerRelease:
 	case TriggerBranch:
 		if w.Trigger.Branch == "" {
@@ -518,11 +570,22 @@ func (w *Watch) normalise(c *Config) error {
 			w.Trigger.TagMatch = "*"
 		}
 	case "":
-		return fmt.Errorf("trigger type is required (release, branch or tag)")
+		return fmt.Errorf("trigger type is required (release, branch, tag or image)")
 	default:
 		return fmt.Errorf("unknown trigger type %q", w.Trigger.Type)
 	}
 
+	if w.Trigger.Type == TriggerImage {
+		// Nothing is checked out, so the release/in-place distinction and shared
+		// paths have nothing to act on.
+		if len(w.Shared) > 0 {
+			return fmt.Errorf("shared paths need a checkout; an image trigger has none")
+		}
+		if w.Strategy != "" {
+			return fmt.Errorf("strategy applies to a checkout; an image trigger has none")
+		}
+		w.Strategy = StrategyInplace
+	}
 	if w.Strategy == "" {
 		w.Strategy = c.Defaults.Strategy
 	}
@@ -705,6 +768,19 @@ func (h *Heartbeat) normalise() error {
 
 // Enabled reports whether a heartbeat is configured.
 func (h Heartbeat) Enabled() bool { return h.URL != "" }
+
+// NeedsCheckout reports whether this watch places a source tree on disk. An
+// image trigger does not: the artefact is the image, and the command only has
+// to restart the service.
+func (w *Watch) NeedsCheckout() bool { return w.Trigger.Type != TriggerImage }
+
+// Subject names what the watch follows, for logs and status output.
+func (w *Watch) Subject() string {
+	if w.Trigger.Type == TriggerImage {
+		return w.Trigger.Image
+	}
+	return w.Repo
+}
 
 // IsEnabled reports whether the watch should be scheduled.
 func (w *Watch) IsEnabled() bool { return w.Enabled == nil || *w.Enabled }

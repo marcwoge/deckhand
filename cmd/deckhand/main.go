@@ -196,7 +196,11 @@ func cmdCheck(args []string) error {
 	printNotifications(cfg)
 	for _, w := range eng.Watches() {
 		fmt.Printf("\n  %s\n", w.Name)
-		fmt.Printf("    repository: %s (auth: %s)\n", w.Repo, w.Auth)
+		if w.Trigger.Type == config.TriggerImage {
+			fmt.Printf("    image:      %s\n", w.Trigger.Image)
+		} else {
+			fmt.Printf("    repository: %s (auth: %s)\n", w.Repo, w.Auth)
+		}
 		fmt.Printf("    trigger:    %s\n", triggerLine(w))
 		fmt.Printf("    path:       %s (strategy %s)\n", w.Path, w.Strategy)
 		fmt.Printf("    window:     %s\n", w.Window.Describe())
@@ -258,6 +262,10 @@ func hostOf(raw string) string {
 // warnings surfaces configurations that are legal but worth a second look.
 func warnings(w *config.Watch) []string {
 	var out []string
+	if w.Trigger.Type == config.TriggerImage {
+		out = append(out, "builds nothing: the image is expected to be built elsewhere "+
+			"and pushed to the registry")
+	}
 	for _, c := range w.Run {
 		if c.Shell != "" {
 			out = append(out, "uses \"shell:\"; prefer an argv list so repository content can never be interpreted by a shell")
@@ -292,6 +300,11 @@ func inside(path, dir string) bool {
 
 func triggerLine(w *config.Watch) string {
 	switch w.Trigger.Type {
+	case config.TriggerImage:
+		if w.Trigger.TagMatch != "" {
+			return "a new digest on any image tag matching " + w.Trigger.TagMatch
+		}
+		return "a new digest on image tag " + w.Trigger.Tag
 	case config.TriggerBranch:
 		return "new commit on branch " + w.Trigger.Branch
 	case config.TriggerTag:

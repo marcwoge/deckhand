@@ -278,3 +278,17 @@ func TestSafeJoinRejectsRootItself(t *testing.T) {
 		}
 	}
 }
+
+// An image digest must abbreviate to something that still identifies it.
+func TestShortHandlesDigests(t *testing.T) {
+	digest := "sha256:aaaa000000000000000000000000000000000000000000000000000000000001"
+	if got := Short(digest); got != "sha256:aaaa00000000" {
+		t.Errorf("Short(digest) = %q, want the algorithm plus twelve hex characters", got)
+	}
+	if got := Short("9f3c2ab8e4d1c5a7"); got != "9f3c2ab8" {
+		t.Errorf("Short(sha) = %q, want the usual eight characters", got)
+	}
+	if got := Short("short"); got != "short" {
+		t.Errorf("Short(%q) = %q, want it unchanged", "short", got)
+	}
+}

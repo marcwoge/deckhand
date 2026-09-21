@@ -65,7 +65,11 @@ func (e *Engine) deployTarget(ctx context.Context, w *config.Watch, t *gh.Target
 	d := deploy.New(w, e.watchStateDir(w), token, e.binary, log)
 
 	start := time.Now()
-	log("deploying %s %s (%s)", t.Kind, t.Ref, deploy.Short(t.SHA))
+	if t.Kind == "image" {
+		log("deploying image %s (%s)", t.Ref, deploy.Short(strings.TrimPrefix(t.SHA, "sha256:")))
+	} else {
+		log("deploying %s %s (%s)", t.Kind, t.Ref, deploy.Short(t.SHA))
+	}
 
 	err = e.runDeploySteps(ctx, w, d, st, t, log)
 	duration := time.Since(start)
@@ -81,7 +85,9 @@ func (e *Engine) deployTarget(ctx context.Context, w *config.Watch, t *gh.Target
 		if err := st.Save(); err != nil {
 			log("warning: could not save state: %v", err)
 		}
-		d.Prune(w.KeepReleases, st.CurrentRelease, st.PreviousRelease)
+		if w.NeedsCheckout() {
+			d.Prune(w.KeepReleases, st.CurrentRelease, st.PreviousRelease)
+		}
 		log("deployed %s in %s", deploy.Short(t.SHA), duration.Round(time.Millisecond))
 		_ = e.audit.Write(audit.Event{Watch: w.Name, Repo: w.Repo, Action: "deploy", Result: "ok",
 			Ref: t.Ref, SHA: t.SHA, Duration: duration.Round(time.Millisecond).String()})
@@ -173,6 +179,25 @@ func (e *Engine) deployTarget(ctx context.Context, w *config.Watch, t *gh.Target
 func (e *Engine) runDeploySteps(ctx context.Context, w *config.Watch, d *deploy.Deployer,
 	st *deploy.State, t *gh.Target, log func(string, ...interface{})) error {
 
+	// An image trigger has no source tree: the artefact is the image, already
+	// built elsewhere, and the command only has to bring the service onto it.
+	if !w.NeedsCheckout() {
+		st.ActiveSHA, st.ActiveRelease = t.SHA, w.Path
+		if err := st.Save(); err != nil {
+			log("warning: could not save state: %v", err)
+		}
+		env := e.runnerEnv(w, d, t, st, "deploy", "")
+		if _, err := runner.RunAll(ctx, w.Run, runner.Options{
+			WorkDir: w.Path,
+			Timeout: time.Duration(w.CommandTimeout),
+			Env:     env,
+			Logf:    log,
+		}); err != nil {
+			return err
+		}
+		return health.Check(ctx, w.Health, w.Path, env, log)
+	}
+
 	if err := d.Fetch(ctx); err != nil {
 		return fmt.Errorf("fetch: %w", err)
 	}
@@ -212,6 +237,23 @@ func (e *Engine) runDeploySteps(ctx context.Context, w *config.Watch, d *deploy.
 // the service actually goes back, not just the files on disk.
 func (e *Engine) rollbackTo(ctx context.Context, w *config.Watch, d *deploy.Deployer,
 	st *deploy.State, log func(string, ...interface{}), releaseDir, sha string) error {
+
+	// With an image there is nothing on disk to switch: the previous digest is
+	// handed to the command, which pins it through DECKHAND_IMAGE_REF.
+	if !w.NeedsCheckout() {
+		if sha == "" {
+			return fmt.Errorf("no previous image digest recorded")
+		}
+		env := e.runnerEnv(w, d, nil, st, "rollback", "")
+		env["DECKHAND_SHA"] = sha
+		env["DECKHAND_SHORT_SHA"] = deploy.Short(sha)
+		env["DECKHAND_IMAGE_DIGEST"] = sha
+		env["DECKHAND_IMAGE_REF"] = w.Trigger.Image + "@" + sha
+		_, err := runner.RunAll(ctx, w.Run, runner.Options{
+			WorkDir: w.Path, Timeout: time.Duration(w.CommandTimeout), Env: env, Logf: log,
+		})
+		return err
+	}
 
 	if err := d.RollbackTo(ctx, releaseDir, sha); err != nil {
 		return err
@@ -283,7 +325,7 @@ func (e *Engine) ResumeWatch(w *config.Watch) error {
 // hasRunning reports whether a revision is live that a failed deployment can
 // be rolled back to.
 func hasRunning(w *config.Watch, st *deploy.State) bool {
-	if w.Strategy == config.StrategyInplace {
+	if !w.NeedsCheckout() || w.Strategy == config.StrategyInplace {
 		return st.LastSHA != ""
 	}
 	if st.CurrentRelease == "" {
@@ -294,7 +336,7 @@ func hasRunning(w *config.Watch, st *deploy.State) bool {
 }
 
 func hasPrevious(w *config.Watch, st *deploy.State) bool {
-	if w.Strategy == config.StrategyInplace {
+	if !w.NeedsCheckout() || w.Strategy == config.StrategyInplace {
 		return st.PreviousSHA != ""
 	}
 	if st.PreviousRelease == "" {
@@ -312,7 +354,7 @@ func previousLabel(w *config.Watch, st *deploy.State) string {
 }
 
 func currentReleaseDir(w *config.Watch, d *deploy.Deployer, t *gh.Target) string {
-	if w.Strategy == config.StrategyInplace {
+	if !w.NeedsCheckout() || w.Strategy == config.StrategyInplace {
 		return w.Path
 	}
 	return filepathJoin(w.Path, "releases", t.SHA)

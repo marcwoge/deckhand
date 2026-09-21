@@ -25,6 +25,10 @@ opens; if none is configured, it deploys immediately. A health check decides
 whether the deployment counts as successful, and a failed deployment is rolled
 back automatically.
 
+Where a build must not happen on the machine that serves traffic, it can watch a
+container image instead: something else builds and pushes, and deckhand notices
+the new digest and restarts the service.
+
 It reports what it did over the channels you configure — push to a phone, a
 team chat, your own endpoint — and a Telegram bot doubles as a remote control
 you can ask for status or tell to roll back. A heartbeat to an outside service
@@ -65,6 +69,7 @@ with signed checksums and build provenance.
 | New release, with pre-release and tag-pattern filters | ✅ |
 | New commit on a named branch (covers merges and pushes) | ✅ |
 | New tag matching a pattern, ordered by version | ✅ |
+| New container image digest in a registry, so the build happens elsewhere | ✅ |
 | Conditional polling with ETags — unchanged answers cost no rate limit | ✅ |
 | Automatic backoff on API errors and rate limits | ✅ |
 | Optional webhook receiver as an alternative to polling | 💭 |

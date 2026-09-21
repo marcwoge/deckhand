@@ -167,6 +167,20 @@ notify:
 Channels are independent: one broken endpoint neither stops the others nor
 affects the deployment.
 
+## `registry`
+
+Pull credentials per registry host, needed only for image triggers — and then
+only for private images.
+
+```yaml
+registry:
+  ghcr.io:
+    username: your-github-name
+    password_env: DECKHAND_GHCR_TOKEN     # or password_file / password
+```
+
+See [building-elsewhere.md](building-elsewhere.md#registry-credentials).
+
 ## `heartbeat`
 
 Optional but recommended. Every notification channel only fires when something
@@ -203,8 +217,10 @@ Each entry describes one repository.
 
 ```yaml
 trigger:
-  type: release        # release | branch | tag
+  type: release        # release | branch | tag | image
   branch: main         # required for type: branch
+  image: ghcr.io/you/app # required for type: image, see building-elsewhere.md
+  tag: latest          # for type: image
   tag_match: "v*"      # glob, for release and tag
   prerelease: false    # include pre-releases (release only)
 ```

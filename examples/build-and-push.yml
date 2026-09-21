@@ -1,0 +1,74 @@
+# Build a container image in CI and push it to ghcr.io, so the production
+# machine never needs a build toolchain. Copy this into .github/workflows/ of
+# the repository you deploy.
+#
+# On production, a deckhand watch with an image trigger notices the new digest:
+#
+#   watch:
+#     - name: shop
+#       trigger: { type: image, image: ghcr.io/YOUR-NAME/YOUR-REPO, tag: latest }
+#       path: /srv/shop
+#       run: [["docker", "compose", "pull"], ["docker", "compose", "up", "-d"]]
+#
+# See docs/en/building-elsewhere.md.
+name: Build and push image
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write        # to push to ghcr.io
+  id-token: write        # for signing, see the last step
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      # Pin actions to a commit SHA: a tag can be moved by whoever controls the
+      # action's repository, and this workflow can push images.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Run the tests here, not on the production machine.
+      - name: Test
+        run: |
+          if [ -f go.mod ]; then go test ./...; fi
+          if [ -f package.json ]; then npm ci && npm test --if-present; fi
+
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3
+      - uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}   # provided automatically
+
+      # Tags: latest for the main branch, plus the version for a tag push.
+      - id: meta
+        uses: docker/metadata-action@369eb591f429131d6889c46b94e711f089e6ca96 # v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=tag
+            type=sha,format=long
+
+      - id: build
+        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcaf3b2c8d8fa # v6
+        with:
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Layer cache in the registry: later builds reuse unchanged layers.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Provenance ties the image to this workflow, so production can verify
+      # where it came from. Optional but cheap.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true

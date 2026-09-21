@@ -8,6 +8,7 @@ cmd/deckhand/          CLI: subcommands, flag parsing, the git askpass helper
 internal/config/       YAML types, validation, time-window parsing
 internal/gh/           GitHub REST client with ETag caching
 internal/ghapp/        GitHub App: JWT assertions and installation tokens
+internal/registry/     OCI registry: image digests for image triggers
 internal/deploy/       git operations, release directories, links, state
 internal/runner/       command execution, timeouts, process groups
 internal/health/       post-deploy checks
@@ -124,6 +125,18 @@ Two details worth keeping: a failed renewal falls back to a token that is still
 valid, so a hiccup at GitHub does not fail a deployment; and endpoints with no
 repository (`/rate_limit`) reuse any known installation, because there is
 nothing to derive one from.
+
+## Image triggers
+
+An image trigger has no checkout: `Watch.NeedsCheckout()` is false, and
+`runDeploySteps` runs the command straight away in `path`, a directory the
+operator maintains. The digest takes the place of a commit SHA throughout - state,
+status, audit log and rollback all work unchanged, because they only ever compare
+and record a string.
+
+Rollback works because the digest reaches the command as `DECKHAND_IMAGE_REF`. A
+compose file referring to it pins the exact image, so going back means starting
+the previous digest rather than pulling a moved tag again.
 
 ## Reload
 

@@ -58,7 +58,28 @@ otherwise.
 
 Use this when your workflow pushes tags but does not create GitHub Releases.
 
+## `image` — deploy what was built elsewhere
+
+```yaml
+trigger:
+  type: image
+  image: ghcr.io/you/app
+  tag: latest            # or tag_match: "v*"
+```
+
+Watches the **digest** behind a tag in a container registry rather than a git
+repository. Nothing is checked out: the artefact is the image, built on another
+machine, and your command only has to bring the service onto it.
+
+Use this when the build must not happen on the production machine — which is the
+right default for anything with a compile or bundling step. The full setup,
+including how to make rollback work, is in
+[building-elsewhere.md](building-elsewhere.md).
+
 ## How polling works
+
+For an image trigger, each poll is a `HEAD` request for the manifest, which
+returns the digest and no body. Everything below describes the GitHub triggers.
 
 Every poll is a conditional request carrying the ETag of the previous answer.
 When nothing changed GitHub replies `304 Not Modified`, which costs no rate

@@ -19,6 +19,7 @@ import (
 	"github.com/marcwoge/deckhand/internal/ghapp"
 	"github.com/marcwoge/deckhand/internal/heartbeat"
 	"github.com/marcwoge/deckhand/internal/notify"
+	"github.com/marcwoge/deckhand/internal/registry"
 )
 
 // Engine owns every watch in a config.
@@ -27,7 +28,9 @@ type Engine struct {
 	client *gh.Client
 	anon   *gh.Client
 	// app is set when authenticating as a GitHub App.
-	app      *ghapp.Authenticator
+	app *ghapp.Authenticator
+	// registry reads image digests for image triggers.
+	registry *registry.Client
 	audit    *audit.Log
 	notifier *notify.Notifier
 	binary   string
@@ -83,12 +86,21 @@ func New(cfg *config.Config, o Options) (*Engine, error) {
 		return nil, fmt.Errorf("audit log: %w", err)
 	}
 	host, _ := os.Hostname()
+	creds := map[string]registry.Credential{}
+	for hostName, auth := range cfg.Registry {
+		password, err := auth.ResolvePassword()
+		if err != nil {
+			return nil, fmt.Errorf("registry %s: %w", hostName, err)
+		}
+		creds[hostName] = registry.Credential{Username: auth.Username, Password: password}
+	}
 	notifier, notifyErr := notify.New(cfg.Notify)
 	e := &Engine{
 		cfg:             cfg,
 		client:          gh.New(cfg.GitHub.API, token),
 		anon:            gh.New(cfg.GitHub.API, nil),
 		app:             app,
+		registry:        registry.New(creds),
 		audit:           al,
 		notifier:        notifier,
 		binary:          o.Binary,
@@ -335,6 +347,16 @@ func (e *Engine) Reload(ctx context.Context) error {
 	e.authDescription = description
 	e.client = gh.New(newCfg.GitHub.API, token)
 	e.anon = gh.New(newCfg.GitHub.API, nil)
+	newCreds := map[string]registry.Credential{}
+	for hostName, auth := range newCfg.Registry {
+		password, perr := auth.ResolvePassword()
+		if perr != nil {
+			e.logf("config", "registry %s: %v", hostName, perr)
+			continue
+		}
+		newCreds[hostName] = registry.Credential{Username: auth.Username, Password: password}
+	}
+	e.registry = registry.New(newCreds)
 	e.notifier = notifier
 
 	if err := e.start(ctx); err != nil {
@@ -351,13 +373,13 @@ func (e *Engine) runWatch(ctx context.Context, w *config.Watch) {
 	// which one watch at a minute would exhaust. Other endpoints - GitHub
 	// Enterprise, a mirror, a test server - have their own limits, so the
 	// configured interval is honoured there.
-	if w.Auth == "none" && !e.Authenticated() && interval < 5*time.Minute &&
+	if w.NeedsCheckout() && w.Auth == "none" && !e.Authenticated() && interval < 5*time.Minute &&
 		isPublicGitHub(e.cfg.GitHub.API) {
 		interval = 5 * time.Minute
 		e.logf(w.Name, "no token available; polling every %s to stay inside github.com's anonymous rate limit", interval)
 	}
 	e.logf(w.Name, "watching %s (%s), window %s, every %s",
-		w.Repo, describeTrigger(w), w.Window.Describe(), interval)
+		w.Subject(), describeTrigger(w), w.Window.Describe(), interval)
 
 	var pending *gh.Target
 	var queuedNotice time.Time
@@ -455,6 +477,11 @@ func isPublicGitHub(api string) bool {
 
 func describeTrigger(w *config.Watch) string {
 	switch w.Trigger.Type {
+	case config.TriggerImage:
+		if w.Trigger.TagMatch != "" {
+			return "image tags matching " + w.Trigger.TagMatch
+		}
+		return "image tag " + w.Trigger.Tag
 	case config.TriggerBranch:
 		return "branch " + w.Trigger.Branch
 	case config.TriggerTag:
@@ -467,8 +494,11 @@ func describeTrigger(w *config.Watch) string {
 	}
 }
 
-// resolve asks GitHub what the watch currently points at.
+// resolve asks GitHub - or the registry - what the watch currently points at.
 func (e *Engine) resolve(ctx context.Context, w *config.Watch) (*gh.Target, error) {
+	if w.Trigger.Type == config.TriggerImage {
+		return e.resolveImage(ctx, w)
+	}
 	c := e.clientFor(w)
 	switch w.Trigger.Type {
 	case config.TriggerBranch:
@@ -478,6 +508,35 @@ func (e *Engine) resolve(ctx context.Context, w *config.Watch) (*gh.Target, erro
 	default:
 		return c.LatestRelease(ctx, w.Repo, w.Trigger.TagMatch, w.Trigger.Prerelease)
 	}
+}
+
+// resolveImage reads the digest a tag currently points at. A rebuilt image under
+// the same tag changes the digest, which is exactly the event to deploy on.
+func (e *Engine) resolveImage(ctx context.Context, w *config.Watch) (*gh.Target, error) {
+	ref, err := registry.ParseReference(w.Trigger.Image)
+	if err != nil {
+		return nil, err
+	}
+	if w.Trigger.TagMatch != "" {
+		tag, err := e.registry.MatchTag(ctx, ref, w.Trigger.TagMatch)
+		if err != nil {
+			return nil, err
+		}
+		ref.Tag = tag
+	} else if w.Trigger.Tag != "" {
+		ref.Tag = w.Trigger.Tag
+	}
+	digest, err := e.registry.Digest(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	return &gh.Target{
+		SHA:  digest,
+		Ref:  ref.Tag,
+		Kind: "image",
+		Name: ref.String(),
+		URL:  ref.Registry + "/" + ref.Name,
+	}, nil
 }
 
 func (e *Engine) loadState(w *config.Watch) (*deploy.State, error) {
@@ -542,6 +601,19 @@ func (e *Engine) runnerEnv(w *config.Watch, d *deploy.Deployer, t *gh.Target, st
 		env["DECKHAND_SHORT_SHA"] = deploy.Short(t.SHA)
 		env["DECKHAND_REF"] = t.Ref
 		env["DECKHAND_KIND"] = t.Kind
+	}
+	if w.Trigger.Type == config.TriggerImage {
+		// A compose file referring to ${DECKHAND_IMAGE_REF} pins the exact
+		// image, which is what makes a rollback to the previous digest work.
+		env["DECKHAND_IMAGE"] = w.Trigger.Image
+		if t != nil {
+			env["DECKHAND_IMAGE_TAG"] = t.Ref
+			env["DECKHAND_IMAGE_DIGEST"] = t.SHA
+			env["DECKHAND_IMAGE_REF"] = w.Trigger.Image + "@" + t.SHA
+		} else if st != nil && st.LastSHA != "" {
+			env["DECKHAND_IMAGE_DIGEST"] = st.LastSHA
+			env["DECKHAND_IMAGE_REF"] = w.Trigger.Image + "@" + st.LastSHA
+		}
 	}
 	if st != nil && st.LastSHA != "" {
 		env["DECKHAND_PREVIOUS_SHA"] = st.LastSHA

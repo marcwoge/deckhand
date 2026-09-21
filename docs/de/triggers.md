@@ -61,7 +61,29 @@ sonst lexikografisch.
 
 Nimm das, wenn dein Arbeitsablauf Tags setzt, aber keine GitHub Releases anlegt.
 
+## `image` — ausrollen, was woanders gebaut wurde
+
+```yaml
+trigger:
+  type: image
+  image: ghcr.io/du/app
+  tag: latest            # oder tag_match: "v*"
+```
+
+Beobachtet den **Digest** hinter einem Tag in einer Container-Registry statt eines
+Git-Repositories. Es wird nichts ausgecheckt: Das Artefakt ist das Image, gebaut
+auf einer anderen Maschine, und dein Befehl muss den Dienst nur darauf bringen.
+
+Nimm das, wenn der Build nicht auf der Produktionsmaschine passieren darf — die
+richtige Voreinstellung für alles mit einem Kompilier- oder Bündelschritt. Die
+vollständige Einrichtung, auch wie der Rollback funktioniert, steht in
+[building-elsewhere.md](building-elsewhere.md).
+
 ## Wie das Abfragen funktioniert
+
+Bei einem Image-Trigger ist jede Abfrage eine `HEAD`-Anfrage auf das Manifest, die
+den Digest und keinen Inhalt zurückgibt. Alles Folgende beschreibt die
+GitHub-Trigger.
 
 Jede Abfrage ist eine bedingte Anfrage mit dem ETag der vorherigen Antwort. Hat
 sich nichts geändert, antwortet GitHub mit `304 Not Modified` — das kostet kein

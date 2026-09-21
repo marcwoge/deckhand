@@ -41,7 +41,7 @@ func (e *Engine) Status() ([]Status, error) {
 			return nil, err
 		}
 		out = append(out, Status{
-			Name: w.Name, Repo: w.Repo, Trigger: describeTrigger(w),
+			Name: w.Name, Repo: w.Subject(), Trigger: describeTrigger(w),
 			Window: w.Window.Describe(), Path: w.Path,
 			SHA: st.LastSHA, Ref: st.LastRef, ActiveSHA: st.ActiveSHA, LastSuccess: st.LastSuccess,
 			LastAttempt: st.LastAttempt, Failures: st.Failures, Halted: st.Halted,
