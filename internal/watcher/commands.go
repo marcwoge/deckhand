@@ -17,6 +17,7 @@ import (
 // commandHelp is sent for /help and for anything unrecognised.
 const commandHelp = `deckhand commands
 
+/menu                buttons for all of this
 /status              what every watch is on
 /history [watch]     the last deployments
 /deploy <watch>      deploy now, ignoring the time window
@@ -50,6 +51,12 @@ func (e *Engine) runCommandBot(ctx context.Context) {
 		return
 	}
 	e.logf("telegram", "listening for commands from chat %s as @%s", ch.ChatID, username)
+
+	// Publishing the command list is convenience, not a precondition: a bot
+	// that cannot set it still answers every command.
+	if err := client.SetCommands(ctx, botCommands()); err != nil {
+		e.logf("telegram", "could not publish the command list: %v", err)
+	}
 	e.runCommandBotWith(ctx, client, ch.ChatID)
 }
 
@@ -99,6 +106,12 @@ func (e *Engine) runCommandBotWith(ctx context.Context, client *telegram.Client,
 }
 
 func (e *Engine) handleUpdate(ctx context.Context, client *telegram.Client, chatID string, u telegram.Update) {
+	if u.CallbackQuery != nil {
+		// A button press. It carries no timestamp of its own, and its one-time
+		// tokens expire on their own, so the age check below does not apply.
+		e.handleCallback(ctx, client, chatID, u.CallbackQuery)
+		return
+	}
 	if u.Message == nil || strings.TrimSpace(u.Message.Text) == "" {
 		return
 	}
@@ -116,6 +129,16 @@ func (e *Engine) handleUpdate(ctx context.Context, client *telegram.Client, chat
 		return
 	}
 
+	// The menu is the only command that answers with buttons, so it is handled
+	// here rather than in runCommand, which returns text.
+	if isMenuCommand(u.Message.Text) {
+		v := e.homeView("")
+		if err := client.SendWithKeyboard(ctx, chatID, v.text, v.mono, v.keys); err != nil {
+			e.logf("telegram", "could not send the menu: %v", err)
+		}
+		return
+	}
+
 	reply, monospace := e.runCommand(ctx, u.Message.Text)
 	if reply == "" {
 		return
@@ -123,6 +146,22 @@ func (e *Engine) handleUpdate(ctx context.Context, client *telegram.Client, chat
 	if err := client.Send(ctx, chatID, reply, monospace); err != nil {
 		e.logf("telegram", "could not reply: %v", err)
 	}
+}
+
+// isMenuCommand recognises "/menu", including the "/menu@bot_name" form groups
+// use.
+func isMenuCommand(text string) bool {
+	fields := strings.Fields(strings.TrimSpace(text))
+	if len(fields) == 0 {
+		return false
+	}
+	cmd := strings.ToLower(fields[0])
+	if at := strings.IndexByte(cmd, '@'); at >= 0 {
+		cmd = cmd[:at]
+	}
+	// "/start" is what Telegram sends when a chat is opened for the first
+	// time, and buttons are a friendlier first screen than a command list.
+	return cmd == menuCommand || cmd == "menu" || cmd == "/start"
 }
 
 // runCommand executes one command and returns the reply plus whether it should
@@ -226,6 +265,11 @@ func (e *Engine) runCommand(ctx context.Context, text string) (string, bool) {
 		return "▶️ Deployments resumed.", false
 
 	case "/help", "help", "/start":
+		return commandHelp, false
+
+	case menuCommand, "menu":
+		// Only reached when a caller bypasses handleUpdate; the buttons are
+		// sent there.
 		return commandHelp, false
 	}
 

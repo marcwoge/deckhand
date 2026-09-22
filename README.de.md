@@ -43,7 +43,7 @@ Das ist die komplette Einrichtung. Neues Release auf GitHub → der Code landet 
 | **Automatischer Rollback** | Ein fehlgeschlagener Befehl oder Health-Check stellt das vorherige Release wieder her und führt den Befehl erneut aus — es kommt also der Dienst zurück, nicht nur die Dateien. |
 | **Zeitfenster** | „Nur zwischen 22:00 und 05:00, und nie Freitagnachmittag." Trigger außerhalb des Fensters werden zusammengefasst: Du bekommst ein Deployment mit dem neuesten Code, nicht zwölf. |
 | **Eine Binärdatei, drei Plattformen** | Linux, macOS, Windows. Keine Laufzeitumgebung, kein Interpreter, keine Abhängigkeiten. `deckhand service install` registriert ihn bei systemd, launchd oder der Windows-Aufgabenplanung. |
-| **Meldungen — und eine Fernbedienung** | Push aufs Handy per ntfy, Slack oder Webhook — oder ein Telegram-Bot, den du `/status` fragen und `/rollback shop` befehlen kannst; abgefragt wie GitHub, also weiterhin ohne eingehenden Port. |
+| **Meldungen — und eine Fernbedienung** | Push aufs Handy per ntfy, Slack oder Webhook — oder ein Telegram-Bot, den du `/status` fragen und `/rollback shop` befehlen kannst — mit `/menu` auch komplett per Knopfdruck; abgefragt wie GitHub, also weiterhin ohne eingehenden Port. |
 | **Merkt den eigenen Tod** | Ein Herzschlag an healthchecks.io oder Uptime Kuma — denn ein abgestürzter Worker sendet keine Meldungen, und Stille sieht genauso aus wie Erfolg. |
 | **Alles wird protokolliert** | Ein fortlaufendes Audit-Log im JSON-Lines-Format über jeden Trigger, jede Revision, jeden Befehl und jeden Exit-Code. |
 

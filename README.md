@@ -43,7 +43,7 @@ That is the whole setup. New release appears on GitHub → the code lands on the
 | **Automatic rollback** | A failing command or health check restores the previous release and re-runs the command, so the service comes back — not just the files. |
 | **Deploy windows** | "Only between 22:00 and 05:00, and never on Friday afternoon." Triggers that arrive outside the window are coalesced: you get one deployment with the newest code, not twelve. |
 | **One binary, three platforms** | Linux, macOS, Windows. No runtime, no interpreter, no dependencies. `deckhand service install` registers it with systemd, launchd or the Windows Task Scheduler. |
-| **Alerts, and a remote control** | Push to your phone via ntfy, Slack or a webhook — or a Telegram bot you can ask `/status` and tell `/rollback shop`, polled like GitHub so there is still no inbound port. |
+| **Alerts, and a remote control** | Push to your phone via ntfy, Slack or a webhook — or a Telegram bot you can ask `/status` and tell `/rollback shop`, with a `/menu` of buttons for the whole thing, polled like GitHub so there is still no inbound port. |
 | **Notices its own death** | A heartbeat to healthchecks.io or Uptime Kuma, because a crashed worker sends no alerts — and silence looks exactly like success. |
 | **Everything is logged** | An append-only JSON Lines audit trail of every trigger, revision, command and exit code. |
 

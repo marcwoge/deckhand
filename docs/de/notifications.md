@@ -78,10 +78,60 @@ fehlgeschlagenen Deployment.
 | `/rollback <watch>` | Zurück auf die vorherige Revision |
 | `/pause [grund]` | Alle Deployments anhalten |
 | `/resume [watch]` | Anhalten aufheben oder gestoppten Watch freigeben |
+| `/menu` | Knöpfe für alles oben |
 | `/help` | Die Liste oben |
 
 Deployments dauern Minuten, deshalb antwortet `/deploy` sofort; das Ergebnis
 kommt als gewöhnliche Benachrichtigung.
+
+Die Befehle werden beim Start auch an Telegram gemeldet: ein `/` im Chat zeigt
+sie dann mit Beschreibung an, statt dass du sie im Kopf haben musst.
+
+### Das Menü
+
+Nachts auf dem Handy `/rollback shop` fehlerfrei zu tippen ist genau der Weg,
+auf dem der falsche Dienst zurückgerollt wird. `/menu` (oder `/start`) ersetzt
+das Tippen durch Knöpfe:
+
+```
+🚢 deckhand on prod-1
+▶️ active
+3 watch(es)
+
+[ 📋 Status ]   [ 🕑 History  ]
+[ 🚀 Deploy ]   [ ↩️ Rollback ]
+[ ⏸ Pause all               ]
+[ ❓ Help                    ]
+```
+
+`🚀 Deploy` zeigt die Watches; nach der Auswahl wird gefragt, bevor etwas
+passiert:
+
+```
+🚀 Deploy shop now, ignoring its time window?
+
+This button works once, for the next 2m0s.
+
+[ ✅ Yes, do it ]
+[ ✖️ Cancel     ]
+```
+
+Das Menü schreibt sich an derselben Stelle um, der Chat füllt sich also nicht
+mit einer Nachricht pro Knopfdruck, und `📋 Status` hat einen
+`🔄 Refresh`-Knopf.
+
+Zwei Eigenschaften sind wichtig:
+
+* **Ein Bestätigungsknopf funktioniert genau einmal und nur zwei Minuten
+  lang.** Der Druck verbraucht ein Einmal-Token im Speicher; derselbe Knopf,
+  morgen im Chat-Verlauf gefunden, deployt nichts und sagt das auch. Ein
+  Neustart von Deckhand verwirft ebenfalls alle offenen Bestätigungen.
+* **Knopfdrücke werden wie Nachrichten geprüft.** Ein Druck aus einem anderen
+  Chat wird abgelehnt — eine weitergeleitete Menü-Nachricht gibt dem Empfänger
+  also nichts.
+
+`Pause` und `Resume` brauchen keine Bestätigung: sie ändern nichts auf der
+Maschine und heben sich gegenseitig auf.
 
 ### Was die Fernbedienung schützt
 
@@ -95,6 +145,8 @@ kommt als gewöhnliche Benachrichtigung.
 * **Der Rückstau wird beim Start übersprungen**, aus demselben Grund.
 * **Der Offset wird gespeichert**, damit ein Neustart keinen bereits
   bearbeiteten Befehl wiederholt.
+* **Ein Knopfdruck wird genauso geprüft**, und jeder Druck wird quittiert,
+  auch ein abgelehnter — der Knopf dreht also nie endlos.
 * **Ein gestohlener Bot-Token reicht nicht zum Deployen.** Er erlaubt
   Mitlesen und das Auftreten als Bot, aber Befehle werden nur von deiner
   Chat-ID angenommen — und die verschafft der Token nicht.

@@ -44,6 +44,9 @@ type Engine struct {
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
 
+	// menu holds the confirmation tokens of the telegram button menu.
+	menu menuState
+
 	// gen is the currently running set of goroutines. A reload stops the old
 	// generation and starts a new one.
 	genMu sync.Mutex

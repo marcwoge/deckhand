@@ -132,6 +132,7 @@ with signed checksums and build provenance.
 | Several notification channels, each with its own event filter | ✅ |
 | Authenticated ntfy (bearer token) with per-event priorities | ✅ |
 | Telegram remote control: /status, /history, /deploy, /rollback, /pause | ✅ |
+| Telegram button menu with confirmation for deploy and rollback | ✅ |
 | Heartbeat to a dead-man's-switch service | ✅ |
 | `--json` output for `status` | ✅ |
 | Audit log rotation, read back across rotations | ✅ |

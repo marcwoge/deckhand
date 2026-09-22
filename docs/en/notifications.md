@@ -74,10 +74,58 @@ so a typo shows up immediately instead of at the first failed deployment.
 | `/rollback <watch>` | Back to the previous revision |
 | `/pause [reason]` | Hold every deployment |
 | `/resume [watch]` | Release the hold, or clear a halted watch |
+| `/menu` | Buttons for all of the above |
 | `/help` | The list above |
 
 Deployments take minutes, so `/deploy` answers immediately and the outcome
 arrives as a normal notification.
+
+The commands are also published to Telegram at startup, so typing `/` in the
+chat offers them with descriptions instead of you having to remember them.
+
+### The menu
+
+Typing `/rollback shop` correctly on a phone, at night, is how the wrong
+service gets rolled back. `/menu` (or `/start`) replaces the typing with
+buttons:
+
+```
+🚢 deckhand on prod-1
+▶️ active
+3 watch(es)
+
+[ 📋 Status ]   [ 🕑 History  ]
+[ 🚀 Deploy ]   [ ↩️ Rollback ]
+[ ⏸ Pause all               ]
+[ ❓ Help                    ]
+```
+
+Picking `🚀 Deploy` lists the watches; picking one asks before anything
+happens:
+
+```
+🚀 Deploy shop now, ignoring its time window?
+
+This button works once, for the next 2m0s.
+
+[ ✅ Yes, do it ]
+[ ✖️ Cancel     ]
+```
+
+The menu rewrites itself in place, so the chat does not fill up with one
+message per press, and `📋 Status` has a `🔄 Refresh` button.
+
+Two properties are worth knowing:
+
+* **A confirmation button works once, and only for two minutes.** Pressing it
+  spends a one-time token held in memory; the same button found in the chat
+  history tomorrow deploys nothing and says so. Restarting Deckhand also
+  invalidates every pending confirmation.
+* **Buttons are checked like messages.** A press from any other chat is
+  refused, so forwarding a menu message to someone else hands them nothing.
+
+`Pause` and `Resume` need no confirmation — they change nothing on the machine
+and each undoes the other.
 
 ### What protects the remote control
 
@@ -90,6 +138,8 @@ arrives as a normal notification.
 * **The backlog is skipped at startup**, for the same reason.
 * **The offset is persisted**, so a restart never replays a command that was
   already handled.
+* **A button press is checked the same way**, and every press is acknowledged
+  even when refused, so the button never spins forever.
 * **Stealing the bot token is not enough to deploy.** It lets an attacker read
   the notifications and impersonate the bot, but commands are only accepted
   from your chat ID, which the token does not grant.

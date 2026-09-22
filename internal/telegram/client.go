@@ -37,10 +37,38 @@ func New(token string) *Client {
 // SetAPI overrides the API base URL. Used by tests.
 func (c *Client) SetAPI(url string) { c.api = strings.TrimRight(url, "/") }
 
-// Update is one incoming event; deckhand only cares about text messages.
+// Update is one incoming event: a text message, or a button press from an
+// inline keyboard.
 type Update struct {
-	UpdateID int      `json:"update_id"`
-	Message  *Message `json:"message"`
+	UpdateID      int            `json:"update_id"`
+	Message       *Message       `json:"message"`
+	CallbackQuery *CallbackQuery `json:"callback_query"`
+}
+
+// CallbackQuery is a press on an inline keyboard button.
+type CallbackQuery struct {
+	ID      string   `json:"id"`
+	From    User     `json:"from"`
+	Message *Message `json:"message"`
+	// Data is what the button carried, at most 64 bytes.
+	Data string `json:"data"`
+}
+
+// Button is one inline keyboard button. Data is sent back when it is pressed.
+type Button struct {
+	Text string `json:"text"`
+	Data string `json:"callback_data"`
+}
+
+// Keyboard is rows of buttons.
+type Keyboard [][]Button
+
+// markup renders the keyboard for the API, or nil when there is none.
+func (k Keyboard) markup() interface{} {
+	if len(k) == 0 {
+		return nil
+	}
+	return map[string]interface{}{"inline_keyboard": k}
 }
 
 // Message is a text message sent to the bot.
@@ -123,14 +151,83 @@ func (c *Client) redact(s string) string {
 // maxMessage is Telegram's limit for a single message.
 const maxMessage = 4096
 
+// maxNotice is Telegram's limit for the toast shown on a pressed button. A
+// longer one is rejected outright, so it is cut instead.
+const maxNotice = 200
+
 // Send delivers a message. Text longer than the API limit is truncated rather
 // than rejected, because a truncated alert beats no alert.
 func (c *Client) Send(ctx context.Context, chatID, text string, monospace bool) error {
+	return c.SendWithKeyboard(ctx, chatID, text, monospace, nil)
+}
+
+// SendWithKeyboard delivers a message with buttons beneath it.
+func (c *Client) SendWithKeyboard(ctx context.Context, chatID, text string, monospace bool,
+	keyboard Keyboard) error {
+
+	payload := messagePayload(text, monospace)
+	payload["chat_id"] = chatID
+	if markup := keyboard.markup(); markup != nil {
+		payload["reply_markup"] = markup
+	}
+	return c.call(ctx, "sendMessage", payload, nil)
+}
+
+// EditMessage replaces the text and buttons of a message already sent. A menu
+// that rewrites itself keeps the chat readable instead of growing a new message
+// per press.
+func (c *Client) EditMessage(ctx context.Context, chatID string, messageID int, text string,
+	monospace bool, keyboard Keyboard) error {
+
+	payload := messagePayload(text, monospace)
+	payload["chat_id"] = chatID
+	payload["message_id"] = messageID
+	// An empty markup clears the buttons, which is what a finished action wants.
+	if markup := keyboard.markup(); markup != nil {
+		payload["reply_markup"] = markup
+	} else {
+		payload["reply_markup"] = map[string]interface{}{"inline_keyboard": [][]Button{}}
+	}
+	err := c.call(ctx, "editMessageText", payload, nil)
+	// Telegram refuses an edit that changes nothing; that is not a failure.
+	if err != nil && strings.Contains(err.Error(), "message is not modified") {
+		return nil
+	}
+	return err
+}
+
+// AnswerCallback acknowledges a button press. Telegram shows a spinner on the
+// button until this arrives, so it must always be sent - even for a press that
+// is refused.
+func (c *Client) AnswerCallback(ctx context.Context, callbackID, notice string) error {
+	payload := map[string]interface{}{"callback_query_id": callbackID}
+	if len(notice) > maxNotice {
+		notice = notice[:maxNotice]
+	}
+	if notice != "" {
+		payload["text"] = notice
+	}
+	return c.call(ctx, "answerCallbackQuery", payload, nil)
+}
+
+// Command is one entry in the bot command menu.
+type Command struct {
+	Command     string `json:"command"`
+	Description string `json:"description"`
+}
+
+// SetCommands publishes the command list, which Telegram shows behind the menu
+// button next to the message field.
+func (c *Client) SetCommands(ctx context.Context, commands []Command) error {
+	return c.call(ctx, "setMyCommands", map[string]interface{}{"commands": commands}, nil)
+}
+
+// messagePayload builds the parts every message body shares.
+func messagePayload(text string, monospace bool) map[string]interface{} {
 	if len(text) > maxMessage {
 		text = text[:maxMessage-20] + "\n… (gekürzt)"
 	}
 	payload := map[string]interface{}{
-		"chat_id":                  chatID,
 		"text":                     text,
 		"disable_web_page_preview": true,
 	}
@@ -139,7 +236,7 @@ func (c *Client) Send(ctx context.Context, chatID, text string, monospace bool) 
 		payload["text"] = "```\n" + strings.ReplaceAll(text, "```", "'''") + "\n```"
 		payload["parse_mode"] = "MarkdownV2"
 	}
-	return c.call(ctx, "sendMessage", payload, nil)
+	return payload
 }
 
 // GetUpdates fetches messages newer than offset, waiting up to timeout seconds
@@ -148,7 +245,7 @@ func (c *Client) GetUpdates(ctx context.Context, offset int, timeout int) ([]Upd
 	var updates []Update
 	payload := map[string]interface{}{
 		"timeout":         timeout,
-		"allowed_updates": []string{"message"},
+		"allowed_updates": []string{"message", "callback_query"},
 	}
 	if offset > 0 {
 		payload["offset"] = offset
