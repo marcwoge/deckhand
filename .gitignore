@@ -12,3 +12,6 @@ deckhand.yml
 .DS_Store
 .idea/
 .vscode/
+
+# Package build staging
+/build/

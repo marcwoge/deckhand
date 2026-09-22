@@ -53,11 +53,32 @@ That is the whole setup. New release appears on GitHub → the code lands on the
 
 **1. Install**
 
-Download the binary for your platform from the [latest release](https://github.com/marcwoge/deckhand/releases/latest), or build it yourself:
+```bash
+# Debian, Ubuntu - creates a deckhand service user, /etc/deckhand and a
+# hardened systemd unit, and leaves the service disabled until you configure it
+sudo apt install ./deckhand_0.1.1_amd64.deb
+
+# Fedora, RHEL, openSUSE
+sudo rpm -i deckhand-0.1.1-1.x86_64.rpm
+
+# macOS (no tap yet, so the formula is installed from its URL)
+brew install https://github.com/marcwoge/deckhand/releases/latest/download/deckhand.rb
+
+# Windows
+scoop install https://github.com/marcwoge/deckhand/releases/latest/download/deckhand.json
+```
+
+Or take the plain binary for your platform from the [latest
+release](https://github.com/marcwoge/deckhand/releases/latest) and put it on
+your `PATH` — no runtime, no dependencies. Building it yourself works too:
 
 ```bash
 go install github.com/marcwoge/deckhand/cmd/deckhand@latest
 ```
+
+Every release is checksummed and the checksum file is signed with cosign; see
+[upgrading](docs/en/upgrading.md) for verifying it, and for
+`scripts/install-release.sh`, which does it for you.
 
 **2. Create a configuration**
 

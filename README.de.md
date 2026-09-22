@@ -53,11 +53,33 @@ Das ist die komplette Einrichtung. Neues Release auf GitHub → der Code landet 
 
 **1. Installieren**
 
-Lade die Binärdatei für deine Plattform aus dem [aktuellen Release](https://github.com/marcwoge/deckhand/releases/latest) — oder baue sie selbst:
+```bash
+# Debian, Ubuntu - legt einen deckhand-Dienstbenutzer, /etc/deckhand und eine
+# gehärtete systemd-Unit an; der Dienst bleibt aus, bis du konfiguriert hast
+sudo apt install ./deckhand_0.1.1_amd64.deb
+
+# Fedora, RHEL, openSUSE
+sudo rpm -i deckhand-0.1.1-1.x86_64.rpm
+
+# macOS (noch kein Tap, deshalb die Formel direkt per URL)
+brew install https://github.com/marcwoge/deckhand/releases/latest/download/deckhand.rb
+
+# Windows
+scoop install https://github.com/marcwoge/deckhand/releases/latest/download/deckhand.json
+```
+
+Oder nimm einfach die Binärdatei für deine Plattform aus dem [aktuellen
+Release](https://github.com/marcwoge/deckhand/releases/latest) und leg sie in
+deinen `PATH` — keine Laufzeitumgebung, keine Abhängigkeiten. Selbst bauen geht
+auch:
 
 ```bash
 go install github.com/marcwoge/deckhand/cmd/deckhand@latest
 ```
+
+Jedes Release hat Checksummen, und die Checksummen-Datei ist mit cosign
+signiert; wie man das prüft — und `scripts/install-release.sh`, das es für dich
+tut — steht unter [Aktualisieren](docs/de/upgrading.md).
 
 **2. Konfiguration anlegen**
 

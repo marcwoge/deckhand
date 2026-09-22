@@ -1,5 +1,15 @@
 # Als Dienst betreiben
 
+Es gibt zwei Wege zu einem laufenden Dienst, und sie stören sich nicht.
+
+**Aus einem Paket** (`.deb`, `.rpm`): das Paket legt eine Unit in
+`/usr/lib/systemd/system/deckhand.service` ab, richtet ein Systemkonto
+`deckhand` ein und lässt den Dienst **deaktiviert**. Ein Deployment-Worker ohne
+Konfiguration hat nichts zu deployen — ihn zu starten ist eine Entscheidung,
+kein Nebeneffekt einer Paketinstallation. Siehe [Aus einem Paket](#aus-einem-paket).
+
+**Aus der Binärdatei**, mit dem Installer:
+
 ```bash
 deckhand service install                                   # aktueller Benutzer
 sudo deckhand service install --system --user deckhand     # ganze Maschine
@@ -108,6 +118,106 @@ Die Strategie `releases` braucht einen Link für `current`. Deckhand legt einen
 Symlink an, wenn er darf, und weicht sonst auf eine Verzeichnis-Junction aus,
 die ohne besondere Rechte funktioniert. Mit aktiviertem Entwicklermodus bekommst
 du echte Symlinks. Passt beides nicht, nimm `strategy: inplace`.
+
+## Aus einem Paket
+
+```bash
+# Debian, Ubuntu
+sudo apt install ./deckhand_0.1.1_amd64.deb
+
+# Fedora, RHEL, openSUSE
+sudo rpm -i deckhand-0.1.1-1.x86_64.rpm
+```
+
+Was das Paket anlegt:
+
+| | |
+|---|---|
+| `/usr/bin/deckhand` | die Binärdatei |
+| `/usr/lib/systemd/system/deckhand.service` | die Unit, genauso gehärtet wie die von `service install --system` |
+| `/etc/deckhand/` | Modus 0750, `root:deckhand` — root schreibt die Konfiguration, der Dienst liest sie |
+| `/var/lib/deckhand/` | Modus 0750, Eigentümer `deckhand` — Zustand und Audit-Log |
+| `/usr/share/doc/deckhand/` | diese Dokumentation, englisch und deutsch |
+| `/usr/share/deckhand/scripts/` | `encrypt-credentials.sh` und `install-release.sh` |
+| der Benutzer `deckhand` | ein Systemkonto ohne Login-Shell und ohne eigenes Home |
+
+Was es bewusst **nicht** tut: den Dienst aktivieren, ihn starten, eine
+Konfiguration schreiben oder einen Token erfinden. Die Unit hat außerdem
+`ConditionPathExists=/etc/deckhand/deckhand.yaml` — ein aktivierter Dienst ohne
+Konfiguration bleibt also still, statt das Journal mit demselben Fehler zu
+füllen.
+
+Nach der Installation:
+
+```bash
+sudo deckhand init --config /etc/deckhand/deckhand.yaml
+sudo chown root:deckhand /etc/deckhand/deckhand.yaml
+sudo chmod 640 /etc/deckhand/deckhand.yaml
+```
+
+Dann bearbeiten — und das Zustandsverzeichnis setzen, damit ein Befehl, den
+**du** aufrufst, denselben Zustand liest wie der Dienst:
+
+```yaml
+defaults:
+  state_dir: /var/lib/deckhand
+```
+
+Prüfen unter dem Konto, das den Dienst später betreibt — nicht als root, das
+würde Zustandsdateien anlegen, die der Dienst nicht schreiben kann:
+
+```bash
+sudo -u deckhand deckhand check --config /etc/deckhand/deckhand.yaml
+sudo -u deckhand deckhand doctor --config /etc/deckhand/deckhand.yaml
+sudo systemctl enable --now deckhand
+```
+
+### Die Paket-Unit übersteuern
+
+Die Unit liegt in `/usr/lib/systemd/system`, dem Ort für Paket-Units. Also:
+
+* ein Drop-in in `/etc/systemd/system/deckhand.service.d/*.conf` ändert einzelne
+  Einstellungen und übersteht Upgrades — genau das Richtige für
+  `LoadCredentialEncrypted=`, zusätzliche `ReadWritePaths=` oder einen anderen
+  Benutzer;
+* eine Datei unter `/etc/systemd/system/deckhand.service` ersetzt die Unit
+  vollständig — das schreibt auch `deckhand service install --system`. Das Paket
+  fasst sie nicht an.
+
+Das Paket zu entfernen stoppt und deaktiviert den Dienst, behält aber
+`/etc/deckhand`, `/var/lib/deckhand` und den Benutzer `deckhand`: dort liegen
+Credentials und Historie, und dem Benutzer gehören womöglich deine
+Deployment-Verzeichnisse. Nur du weißt, ob das noch gebraucht wird.
+
+### Homebrew und Scoop
+
+Es gibt noch kein Tap und keinen Bucket ([Issue #8](https://github.com/marcwoge/deckhand/issues/8)),
+deshalb werden Formel und Manifest mit jedem Release veröffentlicht und direkt
+per URL installiert:
+
+```bash
+brew install https://github.com/marcwoge/deckhand/releases/latest/download/deckhand.rb
+```
+
+```powershell
+scoop install https://github.com/marcwoge/deckhand/releases/latest/download/deckhand.json
+```
+
+Beide werden aus den Release-Binaries erzeugt, und ihre Checksummen stehen in der
+signierten `SHA256SUMS` — eine manipulierte Formel fällt also bei derselben
+Prüfung auf wie eine manipulierte Binärdatei. Einen Dienst richtet keines von
+beiden ein; dafür `deckhand service install` nach dem Konfigurieren.
+
+### Die Pakete selbst bauen
+
+```bash
+go build -o dist/deckhand_v0.1.1_linux_amd64 ./cmd/deckhand
+go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.43.0
+./packaging/build-packages.sh --tag v0.1.1
+```
+
+Der Release-Workflow ruft genau diese zwei Skripte auf — was CI veröffentlicht,
+kommt also auch lokal heraus.
 
 ## Selbst betreiben
 

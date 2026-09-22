@@ -70,6 +70,14 @@ func cmdSecrets(args []string) error {
 	if *asTSV {
 		// Tab-separated so scripts/encrypt-credentials.sh needs neither jq nor
 		// python to read it.
+		//
+		// CodeQL's go/clear-text-logging flags the path here, because it reads
+		// it from a field named PasswordFile and treats anything so named as a
+		// password. It is a path, not a credential, and naming the file is the
+		// point of this command - the operator has to know which file to check.
+		// TestSecretsOutputNeverContainsAValue pins that down. Renaming the
+		// field would silence the query and lose something real: the name is
+		// what keeps it watching the field that does hold the value.
 		for _, r := range rows {
 			fmt.Printf("%s\t%s\t%s\t%s\n", r.Name, r.Kind, r.Path, r.Mode)
 		}

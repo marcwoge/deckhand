@@ -14,6 +14,10 @@ defaults:
   strategy: releases        # releases = atomic switch + rollback | inplace
   keep_releases: 5
   failure_limit: 3          # stop a watch after this many failures in a row
+  # Where state and the audit log live. Set it when the service runs as its own
+  # account, so that a command you run by hand reads the same state as the
+  # service does. The .deb and .rpm packages use /var/lib/deckhand.
+  # state_dir: /var/lib/deckhand
   # audit:
   #   max_size: 10MB        # rotate the audit log past this size (0 = never)
   #   keep: 5

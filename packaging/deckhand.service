@@ -1,0 +1,55 @@
+# The unit installed by the .deb and .rpm packages.
+#
+# It lives in /usr/lib/systemd/system, so a unit you write in
+# /etc/systemd/system/deckhand.service overrides it completely, and a drop-in in
+# /etc/systemd/system/deckhand.service.d/ overrides single settings. Your own
+# files are never touched by a package upgrade.
+#
+# The package installs this disabled. A deployment worker with no configuration
+# has nothing to deploy, so enabling it is a decision, not a side effect of
+# installing a package.
+[Unit]
+Description=Deckhand deployment worker
+Documentation=https://github.com/marcwoge/deckhand
+After=network-online.target
+Wants=network-online.target
+# Without a configuration there is nothing to do, and starting would only fill
+# the journal with the same error.
+ConditionPathExists=/etc/deckhand/deckhand.yaml
+
+[Service]
+Type=simple
+User=deckhand
+Group=deckhand
+ExecStart=/usr/bin/deckhand run --config /etc/deckhand/deckhand.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+
+# /var/lib/deckhand, created and owned by systemd on first start.
+StateDirectory=deckhand
+StateDirectoryMode=0750
+Environment=DECKHAND_STATE_DIR=/var/lib/deckhand
+
+# The worker only needs to read its config, write its state and run the
+# configured commands. Everything else stays out of reach.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+# A crash dump of a process holding deployment tokens would write them to disk.
+LimitCORE=0
+
+# Credentials can be bound to this machine's TPM instead of lying in a file:
+#   systemd-creds encrypt --name=github-token \
+#     /etc/deckhand/github-token /etc/deckhand/github-token.cred
+# then uncomment the line below and set
+#   github: { token_file: ${CREDENTIALS_DIRECTORY}/github-token }
+# See docs/en/security.md, or run scripts/encrypt-credentials.sh.
+# LoadCredentialEncrypted=github-token:/etc/deckhand/github-token.cred
+
+[Install]
+WantedBy=multi-user.target

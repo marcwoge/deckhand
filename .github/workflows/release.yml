@@ -40,7 +40,30 @@ jobs:
               -o "dist/${name}${ext}" ./cmd/deckhand
             echo "built ${name}${ext}"
           done
+
+      # nfpm turns the binaries into .deb and .rpm packages from one config.
+      # Pinned, like every action here: a packaging tool runs over the same
+      # artifacts the release is made of.
+      - name: Install nfpm
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.43.0
+
+      - name: Build packages
+        run: |
+          ./packaging/build-packages.sh --tag "${GITHUB_REF_NAME}"
+          # Package versions carry no leading "v", so the release notes need it
+          # separately to name the files.
+          echo "PKG_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Generate the Homebrew formula and Scoop manifest
+        run: ./packaging/generate-manifests.sh --tag "${GITHUB_REF_NAME}"
+
+      # After the packages and manifests, so one signed file covers everything a
+      # user can download - a tampered formula is caught by the same check as a
+      # tampered binary.
+      - name: Checksums over everything
+        run: |
           cd dist && sha256sum * > SHA256SUMS
+          cat SHA256SUMS
 
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
@@ -62,7 +85,7 @@ jobs:
       - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
-          subject-path: 'dist/deckhand_*'
+          subject-path: 'dist/deckhand*'
 
       - name: Publish
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
@@ -70,7 +93,37 @@ jobs:
           files: dist/*
           generate_release_notes: true
           body: |
-            Download the binary for your platform, put it somewhere on your `PATH`, and get going:
+            ### Installing
+
+            **Debian, Ubuntu** — the package creates a `deckhand` service user,
+            `/etc/deckhand/` and a hardened systemd unit, and leaves the service
+            disabled until you have configured it:
+
+            ```bash
+            curl -fsSLO https://github.com/marcwoge/deckhand/releases/download/${{ github.ref_name }}/deckhand_${{ env.PKG_VERSION }}_amd64.deb
+            sudo dpkg -i deckhand_*.deb            # or: sudo apt install ./deckhand_*.deb
+            ```
+
+            **Fedora, RHEL, openSUSE**:
+
+            ```bash
+            sudo rpm -i https://github.com/marcwoge/deckhand/releases/download/${{ github.ref_name }}/deckhand-${{ env.PKG_VERSION }}-1.x86_64.rpm
+            ```
+
+            **macOS** (there is no tap yet, so install the formula from its URL):
+
+            ```bash
+            brew install https://github.com/marcwoge/deckhand/releases/download/${{ github.ref_name }}/deckhand.rb
+            ```
+
+            **Windows** (no bucket yet either):
+
+            ```powershell
+            scoop install https://github.com/marcwoge/deckhand/releases/download/${{ github.ref_name }}/deckhand.json
+            ```
+
+            **Or just the binary** — download the one for your platform, put it
+            somewhere on your `PATH`:
 
             ```bash
             deckhand init --config deckhand.yaml
@@ -78,6 +131,9 @@ jobs:
             deckhand doctor     # checks connectivity, credentials and permissions
             deckhand service install
             ```
+
+            **Already running Deckhand?** `scripts/install-release.sh` updates it
+            with the verification below done for you.
 
             ### Verifying this release
 
