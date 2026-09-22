@@ -175,6 +175,7 @@ Complete apart from the two items still marked open.
 | Credentials from a command (`pass`, Vault, 1Password, sops) | ✅ [#16](https://github.com/marcwoge/deckhand/issues/16) |
 | systemd-creds support, so secrets are TPM-bound at rest | ✅ [#16](https://github.com/marcwoge/deckhand/issues/16) |
 | `deckhand secrets` — where every credential comes from, no values | ✅ |
+| `scripts/encrypt-credentials.sh` — move credential files into systemd-creds | ✅ |
 | Process hardening: `PR_SET_DUMPABLE`, `LimitCORE=0` | ✅ |
 | OS keychains (macOS Keychain, DPAPI, Secret Service) | 📋 [#16](https://github.com/marcwoge/deckhand/issues/16) |
 | `before:` commands and deploy stages | 📋 |

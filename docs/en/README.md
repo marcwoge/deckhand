@@ -9,6 +9,7 @@
 * [Notifications and monitoring](notifications.md) — Telegram, ntfy, Slack, heartbeat
 * [Security](security.md) — the threat model and how to set it up properly
 * [Running as a service](services.md) — systemd, launchd, Windows
+* [Upgrading](upgrading.md) — what changed, and what is worth changing in your config
 * [Troubleshooting](troubleshooting.md) — when something does not work
 
 **Developer documentation** lives in [../dev/](../dev/).

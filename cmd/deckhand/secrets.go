@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -17,6 +18,8 @@ import (
 func cmdSecrets(args []string) error {
 	fs := flag.NewFlagSet("secrets", flag.ExitOnError)
 	cfgPath := addConfigFlag(fs)
+	asJSON := fs.Bool("json", false, "machine-readable output, for tooling")
+	asTSV := fs.Bool("tsv", false, "tab-separated name/kind/path/mode, readable from a shell script")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -25,15 +28,20 @@ func cmdSecrets(args []string) error {
 		return err
 	}
 
-	type row struct {
-		what, source, note string
-	}
-	var rows []row
+	var rows []secretRow
 	add := func(what string, spec config.SecretSpec) {
 		if !spec.Set() {
 			return
 		}
-		rows = append(rows, row{what, spec.Describe(), note(spec)})
+		r := secretRow{What: what, Source: spec.Describe(), Note: note(spec), Kind: kind(spec)}
+		if spec.File != "" {
+			r.Path = os.ExpandEnv(spec.File)
+			if info, err := os.Stat(r.Path); err == nil {
+				r.Mode = fmt.Sprintf("%04o", info.Mode().Perm())
+			}
+		}
+		r.Name = credentialName(what)
+		rows = append(rows, r)
 	}
 
 	if cfg.GitHub.App != nil {
@@ -42,7 +50,8 @@ func cmdSecrets(args []string) error {
 	add("github token", cfg.GitHub.TokenSpec())
 	for _, w := range cfg.Watches {
 		if w.Auth.Anonymous() {
-			rows = append(rows, row{"watch " + w.Name, "none", "anonymous, public repositories only"})
+			rows = append(rows, secretRow{What: "watch " + w.Name, Kind: "none",
+				Source: "none", Note: "anonymous, public repositories only"})
 			continue
 		}
 		if w.Auth.App != nil {
@@ -58,6 +67,25 @@ func cmdSecrets(args []string) error {
 		add(fmt.Sprintf("notify #%d (%s)", i+1, ch.Type), ch.Spec())
 	}
 
+	if *asTSV {
+		// Tab-separated so scripts/encrypt-credentials.sh needs neither jq nor
+		// python to read it.
+		for _, r := range rows {
+			fmt.Printf("%s\t%s\t%s\t%s\n", r.Name, r.Kind, r.Path, r.Mode)
+		}
+		return nil
+	}
+	if *asJSON {
+		// Scripts - scripts/encrypt-credentials.sh among them - need the list
+		// without parsing a table.
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if rows == nil {
+			rows = []secretRow{}
+		}
+		return enc.Encode(rows)
+	}
+
 	if len(rows) == 0 {
 		fmt.Println("no credentials configured (public repositories only)")
 		return nil
@@ -66,13 +94,68 @@ func cmdSecrets(args []string) error {
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "CREDENTIAL\tSOURCE\tNOTE")
 	for _, r := range rows {
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", r.what, r.source, r.note)
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", r.What, r.Source, r.Note)
 	}
 	if err := tw.Flush(); err != nil {
 		return err
 	}
 	fmt.Println("\nNo values are printed. See docs/en/security.md for encrypting credentials at rest.")
 	return nil
+}
+
+// secretRow is one credential in the overview. The JSON form is a documented
+// interface: scripts/encrypt-credentials.sh reads it.
+type secretRow struct {
+	// What names the setting, e.g. "watch shop".
+	What string `json:"what"`
+	// Name is the filename-safe credential name, matching what
+	// "service install" writes into the systemd unit.
+	Name   string `json:"name"`
+	Kind   string `json:"kind"` // file | env | inline | command | none
+	Source string `json:"source"`
+	// Path is set for a file credential, with the environment expanded.
+	Path string `json:"path,omitempty"`
+	Mode string `json:"mode,omitempty"`
+	Note string `json:"note"`
+}
+
+// kind reduces a source to one word, so a script can branch on it.
+func kind(spec config.SecretSpec) string {
+	switch {
+	case spec.Command != nil:
+		return "command"
+	case spec.File != "":
+		return "file"
+	case spec.Env != "":
+		return "env"
+	case spec.Inline != "":
+		return "inline"
+	}
+	return "none"
+}
+
+// credentialName turns a description into the same filename-safe name that the
+// generated systemd unit uses, so the two can be matched up.
+func credentialName(what string) string {
+	name := strings.NewReplacer(" ", "-", "#", "", "(", "", ")", "", ".", "-").Replace(what)
+	switch {
+	case name == "github-token", name == "github-app-key":
+		return name
+	case strings.HasPrefix(name, "watch-"):
+		if strings.HasSuffix(name, "-app-key") {
+			return name
+		}
+		return name + "-token"
+	case strings.HasPrefix(name, "registry-"):
+		return name + "-password"
+	case strings.HasPrefix(name, "notify-"):
+		// "notify-1-ntfy" -> "notify-1-token", matching credentialFiles.
+		parts := strings.Split(name, "-")
+		if len(parts) >= 2 {
+			return "notify-" + parts[1] + "-token"
+		}
+	}
+	return name
 }
 
 // note reports what is worth knowing about one source: bad permissions, or the

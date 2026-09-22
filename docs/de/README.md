@@ -9,6 +9,7 @@
 * [Benachrichtigungen und Überwachung](notifications.md) — Telegram, ntfy, Slack, Herzschlag
 * [Sicherheit](security.md) — Bedrohungsmodell und saubere Einrichtung
 * [Als Dienst betreiben](services.md) — systemd, launchd, Windows
+* [Aktualisieren](upgrading.md) — was sich geändert hat und was sich in deiner Config lohnt
 * [Fehlersuche](troubleshooting.md) — wenn etwas nicht funktioniert
 
 **Entwicklerdokumentation** liegt unter [../dev/](../dev/) (englisch).

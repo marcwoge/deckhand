@@ -172,7 +172,7 @@ Your command runs in `current`, and gets `DECKHAND_SHA`, `DECKHAND_REF`, `DECKHA
 * **Logs:** `journalctl -u deckhand -f` (Linux), `~/Library/Logs/deckhand.log` (macOS), `deckhand history` on any platform.
 * **Backups:** back up `shared/` — it holds your configuration and data. Everything else can be re-fetched from GitHub.
 
-Full documentation: **[docs/en/](docs/en/)** — [configuration](docs/en/configuration.md) · [triggers](docs/en/triggers.md) · [time windows](docs/en/time-windows.md) · [notifications](docs/en/notifications.md) · [security](docs/en/security.md) · [running as a service](docs/en/services.md) · [troubleshooting](docs/en/troubleshooting.md)
+Full documentation: **[docs/en/](docs/en/)** — [configuration](docs/en/configuration.md) · [triggers](docs/en/triggers.md) · [time windows](docs/en/time-windows.md) · [notifications](docs/en/notifications.md) · [security](docs/en/security.md) · [running as a service](docs/en/services.md) · [upgrading](docs/en/upgrading.md) · [troubleshooting](docs/en/troubleshooting.md)
 
 ---
 
