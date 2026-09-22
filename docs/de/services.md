@@ -191,22 +191,32 @@ Deployment-Verzeichnisse. Nur du weißt, ob das noch gebraucht wird.
 
 ### Homebrew und Scoop
 
-Es gibt noch kein Tap und keinen Bucket ([Issue #8](https://github.com/marcwoge/deckhand/issues/8)),
-deshalb werden Formel und Manifest mit jedem Release veröffentlicht und direkt
-per URL installiert:
-
 ```bash
-brew install https://github.com/marcwoge/deckhand/releases/latest/download/deckhand.rb
+brew tap marcwoge/deckhand
+brew install deckhand
 ```
 
 ```powershell
+scoop bucket add deckhand https://github.com/marcwoge/scoop-deckhand
+scoop install deckhand
+```
+
+Beide installieren die Release-Binärdatei und halten sich selbst aktuell: Tap und
+Bucket erzeugen ihre Datei täglich aus dem neuesten Release neu und nehmen die
+Checksummen aus der `SHA256SUMS` des Releases — nachdem die cosign-Signatur
+darüber geprüft wurde. Was sich nicht verifizieren lässt, wird nicht
+aktualisiert.
+
+Wer kein Tap und keinen Bucket hinzufügen will: jedes Release enthält Formel und
+Manifest auch als einfache Assets:
+
+```bash
+brew install https://github.com/marcwoge/deckhand/releases/latest/download/deckhand.rb
 scoop install https://github.com/marcwoge/deckhand/releases/latest/download/deckhand.json
 ```
 
-Beide werden aus den Release-Binaries erzeugt, und ihre Checksummen stehen in der
-signierten `SHA256SUMS` — eine manipulierte Formel fällt also bei derselben
-Prüfung auf wie eine manipulierte Binärdatei. Einen Dienst richtet keines von
-beiden ein; dafür `deckhand service install` nach dem Konfigurieren.
+Einen Dienst richtet keines von beiden ein; dafür `deckhand service install` nach
+dem Konfigurieren.
 
 ### Die Pakete selbst bauen
 

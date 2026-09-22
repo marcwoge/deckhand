@@ -187,22 +187,30 @@ they are still wanted.
 
 ### Homebrew and Scoop
 
-There is no tap and no bucket yet ([issue #8](https://github.com/marcwoge/deckhand/issues/8)),
-so the formula and the manifest are published with each release and installed
-from their URL:
-
 ```bash
-brew install https://github.com/marcwoge/deckhand/releases/latest/download/deckhand.rb
+brew tap marcwoge/deckhand
+brew install deckhand
 ```
 
 ```powershell
+scoop bucket add deckhand https://github.com/marcwoge/scoop-deckhand
+scoop install deckhand
+```
+
+Both install the release binary, and both keep themselves current: the tap and
+the bucket regenerate their file from the newest release daily, taking the
+checksums from the release's own `SHA256SUMS` after verifying the cosign
+signature over it. A formula that cannot be verified is not updated.
+
+If you would rather not add a tap or a bucket, every release also carries the
+formula and the manifest as plain assets:
+
+```bash
+brew install https://github.com/marcwoge/deckhand/releases/latest/download/deckhand.rb
 scoop install https://github.com/marcwoge/deckhand/releases/latest/download/deckhand.json
 ```
 
-Both are generated from the release binaries and their checksums appear in the
-signed `SHA256SUMS`, so a tampered formula is caught by the same check as a
-tampered binary. Neither installs a service — use `deckhand service install`
-after configuring.
+Neither installs a service — use `deckhand service install` after configuring.
 
 ### Building the packages yourself
 

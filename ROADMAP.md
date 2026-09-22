@@ -187,7 +187,7 @@ Complete apart from the two items still marked open.
 |---|---|
 | Native Windows service (Service Control Manager) instead of a scheduled task | 📋 [#7](https://github.com/marcwoge/deckhand/issues/7) |
 | Packages: `.deb`, `.rpm`, Homebrew formula, Scoop manifest | ✅ [#8](https://github.com/marcwoge/deckhand/issues/8) |
-| A Homebrew tap and a Scoop bucket, so `brew install deckhand` works | 📋 [#8](https://github.com/marcwoge/deckhand/issues/8) |
+| A Homebrew tap and a Scoop bucket, both self-updating from the signed release | ✅ [#8](https://github.com/marcwoge/deckhand/issues/8) |
 | Testing on real macOS and Windows machines | 📋 [#10](https://github.com/marcwoge/deckhand/issues/10) |
 | `scripts/install-release.sh` — verified update from outside | ✅ |
 | `deckhand self-update` from signed releases | 📋 [#15](https://github.com/marcwoge/deckhand/issues/15) |

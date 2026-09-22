@@ -4,6 +4,7 @@
 package packaging
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -164,4 +165,107 @@ func TestPackagedUnitIsHardened(t *testing.T) {
 			t.Errorf("LoadCredentialEncrypted is active: %q", line)
 		}
 	}
+}
+
+// The tap and the bucket are separate repositories, so nothing else would notice
+// if a rename here broke them: their workflows run the generator out of this
+// repository by path.
+func TestTapAndBucketReferenceTheGenerator(t *testing.T) {
+	for _, path := range []string{
+		"tap/.github/workflows/update.yml",
+		"bucket/.github/workflows/update.yml",
+	} {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Errorf("%s: %v", path, err)
+			continue
+		}
+		if !strings.Contains(string(b), "packaging/generate-manifests.sh") {
+			t.Errorf("%s no longer runs the generator", path)
+		}
+		if !strings.Contains(string(b), "--from-release") {
+			t.Errorf("%s must use --from-release, so the checksums come from the "+
+				"signed release rather than from a local build", path)
+		}
+		if !strings.Contains(string(b), "cosign-installer") {
+			t.Errorf("%s must install cosign, or the signature is not checked "+
+				"before the hashes are trusted", path)
+		}
+	}
+}
+
+// Both files are the ones a package manager reads, so a broken one is only found
+// by whoever tries to install.
+func TestTapFormulaAndBucketManifestAreWellFormed(t *testing.T) {
+	formula, err := os.ReadFile("tap/Formula/deckhand.rb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(formula)
+	if !strings.Contains(body, "class Deckhand < Formula") {
+		t.Error("the formula does not define the Deckhand class")
+	}
+	if !strings.Contains(body, `version "`) {
+		t.Error("the formula needs an explicit version; it cannot be parsed from the URL")
+	}
+	// macOS and Linux, arm and intel.
+	if got := strings.Count(body, "sha256 \""); got != 4 {
+		t.Errorf("the formula has %d checksums, want 4 (macOS and Linux, arm and intel)", got)
+	}
+
+	manifest, err := os.ReadFile("bucket/bucket/deckhand.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var scoop struct {
+		Version      string `json:"version"`
+		Bin          string `json:"bin"`
+		Architecture map[string]struct {
+			URL  string `json:"url"`
+			Hash string `json:"hash"`
+		} `json:"architecture"`
+		Autoupdate struct {
+			Hash struct {
+				URL string `json:"url"`
+			} `json:"hash"`
+		} `json:"autoupdate"`
+	}
+	if err := json.Unmarshal(manifest, &scoop); err != nil {
+		t.Fatalf("the Scoop manifest does not parse: %v", err)
+	}
+	if scoop.Bin != "deckhand.exe" {
+		t.Errorf("bin = %q, want deckhand.exe", scoop.Bin)
+	}
+	for _, arch := range []string{"64bit", "arm64"} {
+		entry, ok := scoop.Architecture[arch]
+		if !ok {
+			t.Errorf("no %s architecture in the manifest", arch)
+			continue
+		}
+		if len(entry.Hash) != 64 {
+			t.Errorf("%s hash is %d characters, want a sha256", arch, len(entry.Hash))
+		}
+		// Without the fragment Scoop installs the versioned filename and the
+		// "bin" entry above finds nothing.
+		if !strings.HasSuffix(entry.URL, "#/deckhand.exe") {
+			t.Errorf("%s url must end in #/deckhand.exe, got %q", arch, entry.URL)
+		}
+	}
+	if !strings.Contains(scoop.Autoupdate.Hash.URL, "SHA256SUMS") {
+		t.Error("autoupdate should take its hashes from the release's SHA256SUMS")
+	}
+	if scoop.Version != versionIn(string(formula)) {
+		t.Errorf("the formula is at %q but the manifest at %q; they are generated "+
+			"together and should not drift", versionIn(string(formula)), scoop.Version)
+	}
+}
+
+func versionIn(formula string) string {
+	for _, line := range strings.Split(formula, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "version \"") {
+			return strings.Trim(strings.TrimPrefix(line, "version "), "\"")
+		}
+	}
+	return ""
 }

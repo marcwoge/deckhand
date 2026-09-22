@@ -61,11 +61,12 @@ sudo apt install ./deckhand_0.1.1_amd64.deb
 # Fedora, RHEL, openSUSE
 sudo rpm -i deckhand-0.1.1-1.x86_64.rpm
 
-# macOS (no tap yet, so the formula is installed from its URL)
-brew install https://github.com/marcwoge/deckhand/releases/latest/download/deckhand.rb
+# macOS
+brew tap marcwoge/deckhand && brew install deckhand
 
 # Windows
-scoop install https://github.com/marcwoge/deckhand/releases/latest/download/deckhand.json
+scoop bucket add deckhand https://github.com/marcwoge/scoop-deckhand
+scoop install deckhand
 ```
 
 Or take the plain binary for your platform from the [latest

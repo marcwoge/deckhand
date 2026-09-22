@@ -1,0 +1,40 @@
+{
+    "version": "0.1.1",
+    "description": "Watch GitHub repositories, pull new revisions, run your command",
+    "homepage": "https://github.com/marcwoge/deckhand",
+    "license": "Apache-2.0",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/marcwoge/deckhand/releases/download/v0.1.1/deckhand_v0.1.1_windows_amd64.exe#/deckhand.exe",
+            "hash": "cb062beba52f44e617fadf546e757859eee9d533506d655c8a1a6d0f935af387"
+        },
+        "arm64": {
+            "url": "https://github.com/marcwoge/deckhand/releases/download/v0.1.1/deckhand_v0.1.1_windows_arm64.exe#/deckhand.exe",
+            "hash": "92b321d523917b2a47db5fa4c243d7f5e1818e90779d444ad3453a7505279c83"
+        }
+    },
+    "bin": "deckhand.exe",
+    "checkver": {
+        "github": "https://github.com/marcwoge/deckhand"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/marcwoge/deckhand/releases/download/v$version/deckhand_v$version_windows_amd64.exe#/deckhand.exe"
+            },
+            "arm64": {
+                "url": "https://github.com/marcwoge/deckhand/releases/download/v$version/deckhand_v$version_windows_arm64.exe#/deckhand.exe"
+            }
+        },
+        "hash": {
+            "url": "https://github.com/marcwoge/deckhand/releases/download/v$version/SHA256SUMS"
+        }
+    },
+    "notes": [
+        "Deckhand is installed but not configured. To get started:",
+        "  deckhand init --config %USERPROFILE%\\deckhand\\deckhand.yaml",
+        "  deckhand check",
+        "  deckhand service install",
+        "Documentation: https://github.com/marcwoge/deckhand/tree/main/docs/en"
+    ]
+}

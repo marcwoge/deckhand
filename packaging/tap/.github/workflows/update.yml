@@ -1,0 +1,59 @@
+# Rewrites the formula when Deckhand publishes a release.
+#
+# The checksums come from the release's own SHA256SUMS, and cosign verifies the
+# signature over that file before any of it is trusted. Nothing here needs a
+# secret: the repository's own GITHUB_TOKEN can push to the repository it belongs
+# to, which is why this lives in the tap rather than in the release workflow.
+name: Update the formula
+
+on:
+  schedule:
+    # Daily. A release is picked up within a day, or immediately if you run this
+    # from the Actions tab.
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to pin to (empty means the latest)'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    name: Update the formula
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # The generator lives in the main repository, so there is one copy of it
+      # rather than a divergent one here.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: marcwoge/deckhand
+          path: .deckhand-src
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Generate the formula from the signed release
+        run: |
+          args="--from-release --dist .out"
+          if [ -n "${{ inputs.tag }}" ]; then
+            args="$args --tag ${{ inputs.tag }}"
+          fi
+          ./.deckhand-src/packaging/generate-manifests.sh $args
+          cp .out/deckhand.rb Formula/deckhand.rb
+
+      - name: Commit if it changed
+        run: |
+          if git diff --quiet -- Formula/deckhand.rb; then
+            echo "the formula is already current"
+            exit 0
+          fi
+          version="$(sed -n 's/^  version "\(.*\)"$/\1/p' Formula/deckhand.rb)"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Formula/deckhand.rb
+          git commit -m "deckhand ${version}"
+          git push

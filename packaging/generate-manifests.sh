@@ -8,33 +8,77 @@
 #
 #   ./packaging/generate-manifests.sh --tag v0.1.1
 #
-# There is no Homebrew tap and no Scoop bucket yet (see issue #8). Until there
-# is, both files are published as release assets and can be installed directly
-# from their URL - see docs/en/services.md.
+# With --from-release it takes the checksums from the release's own SHA256SUMS
+# instead of hashing local files, and verifies that file's cosign signature
+# first when cosign is installed. That is the mode the tap and the bucket use to
+# update themselves: they never download a binary, and they trust the same signed
+# file a careful human would check.
+#
+#   ./packaging/generate-manifests.sh --tag v0.1.1 --from-release --dist out
 
 set -eu
 
 TAG=""
 DIST="dist"
 REPO="marcwoge/deckhand"
+FROM_RELEASE=0
 
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--tag) TAG="${2:?--tag needs a version like v0.1.1}"; shift ;;
 	--dist) DIST="${2:?--dist needs a directory}"; shift ;;
 	--repo) REPO="${2:?--repo needs owner/name}"; shift ;;
-	-h|--help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	--from-release) FROM_RELEASE=1 ;;
+	-h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "unknown option $1" >&2; exit 2 ;;
 	esac
 	shift
 done
 
+if [ -z "$TAG" ] && [ "$FROM_RELEASE" -eq 1 ]; then
+	TAG="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" |
+		sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)"
+	[ -n "$TAG" ] || { echo "error: cannot determine the latest release" >&2; exit 1; }
+	echo "latest release: $TAG"
+fi
 [ -n "$TAG" ] || { echo "error: --tag is required" >&2; exit 2; }
 VERSION="${TAG#v}"
 BASE="https://github.com/$REPO/releases/download/$TAG"
 
+mkdir -p "$DIST"
+
+SUMS=""
+if [ "$FROM_RELEASE" -eq 1 ]; then
+	SUMS="$DIST/SHA256SUMS.release"
+	curl -fsSL -o "$SUMS" "$BASE/SHA256SUMS" ||
+		{ echo "error: $TAG has no SHA256SUMS" >&2; exit 1; }
+
+	# The checksums are only worth anything if the file carrying them is the one
+	# the release workflow signed. Without cosign the hashes are still correct
+	# for whatever is published, which is enough to build a manifest, but say so.
+	if command -v cosign >/dev/null 2>&1; then
+		curl -fsSL -o "$SUMS.bundle" "$BASE/SHA256SUMS.bundle" ||
+			{ echo "error: $TAG has no signature" >&2; exit 1; }
+		cosign verify-blob "$SUMS" \
+			--bundle "$SUMS.bundle" \
+			--certificate-identity-regexp \
+			"https://github.com/$REPO/.github/workflows/release.yml@.*" \
+			--certificate-oidc-issuer https://token.actions.githubusercontent.com ||
+			{ echo "error: the checksum file is not signed by $REPO's release workflow" >&2
+				exit 1; }
+		echo "signature verified"
+	else
+		echo "warning: cosign is not installed, so the checksum file is used unverified" >&2
+	fi
+fi
+
 hash_of() {
-	# $1 asset name; empty output means the asset is not there.
+	# $1 asset name. Empty output means it is not there.
+	if [ -n "$SUMS" ]; then
+		# The release's own checksums: "<hash>  <name>".
+		awk -v want="$1" '$2 == want || $2 == "*" want { print $1; exit }' "$SUMS"
+		return
+	fi
 	if [ ! -f "$DIST/$1" ]; then
 		echo ""
 		return
@@ -48,7 +92,14 @@ hash_of() {
 
 require() {
 	# $1 name, $2 hash
-	[ -n "$2" ] || { echo "error: $DIST/$1 is missing" >&2; exit 1; }
+	if [ -z "$2" ]; then
+		if [ -n "$SUMS" ]; then
+			echo "error: $1 is not listed in the release's SHA256SUMS" >&2
+		else
+			echo "error: $DIST/$1 is missing" >&2
+		fi
+		exit 1
+	fi
 }
 
 darwin_arm64="deckhand_${TAG}_darwin_arm64"
@@ -142,6 +193,19 @@ cat > "$DIST/deckhand.json" <<MANIFEST
     "bin": "deckhand.exe",
     "checkver": {
         "github": "https://github.com/$REPO"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/$REPO/releases/download/v\$version/deckhand_v\$version_windows_amd64.exe#/deckhand.exe"
+            },
+            "arm64": {
+                "url": "https://github.com/$REPO/releases/download/v\$version/deckhand_v\$version_windows_arm64.exe#/deckhand.exe"
+            }
+        },
+        "hash": {
+            "url": "https://github.com/$REPO/releases/download/v\$version/SHA256SUMS"
+        }
     },
     "notes": [
         "Deckhand is installed but not configured. To get started:",
