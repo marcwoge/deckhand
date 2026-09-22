@@ -156,11 +156,100 @@ Pause, mit Bestätigung, bevor etwas deployt oder zurückgerollt wird. Die
 Befehlsliste wird beim Start an Telegram gemeldet, ein `/` im Chat zeigt sie
 also mit Beschreibung. Siehe [notifications](notifications.md#das-menü).
 
+## Deckhand selbst aktuell halten
+
+Deckhand hält alles andere aktuell und wird selbst per Hand aktualisiert — damit
+kommen Sicherheitsfixes spät, und spät ist hier die schlechteste Variante. Ein
+eingebautes `deckhand self-update` ist
+[Issue #15](https://github.com/marcwoge/deckhand/issues/15); bis dahin macht
+`scripts/install-release.sh` dasselbe von außen, mit derselben Prüfung:
+
+```bash
+sudo ./scripts/install-release.sh                   # neuestes Release
+sudo ./scripts/install-release.sh --check           # Exit 1, wenn es ein Update gibt
+sudo ./scripts/install-release.sh --version v0.1.0  # ein bestimmtes — auch der Weg zurück
+```
+
+Es lädt das passende Release-Asset, **prüft die Checksummen-Datei gegen ihre
+cosign-Signatur** (an den Release-Workflow dieses Repositories gebunden und im
+öffentlichen Transparenz-Log vermerkt), dann die Checksumme des Assets, behält
+die alte Binary daneben, ruft `deckhand check` auf und startet den Dienst neu —
+mit Rückrollen, wenn die neue Binary nicht läuft oder der Dienst nicht
+zurückkommt. Es braucht installiertes `cosign`; nur `SHA256SUMS` zu prüfen würde
+nichts beweisen, weil die Checksummen-Datei von derselben Stelle kommt wie die
+Binary.
+
+Unbeaufsichtigt ist ein Timer der ehrlichere Weg, statt Deckhand sich selbst
+deployen zu lassen:
+
+```ini
+# /etc/systemd/system/deckhand-update.service
+[Unit]
+Description=Update Deckhand from its signed releases
+
+[Service]
+Type=oneshot
+ExecStart=/opt/deckhand/install-release.sh --unit deckhand.service
+```
+
+```ini
+# /etc/systemd/system/deckhand-update.timer
+[Unit]
+Description=Check for a new Deckhand release
+
+[Timer]
+OnCalendar=Sun 03:30
+RandomizedDelaySec=30m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+```bash
+sudo systemctl enable --now deckhand-update.timer
+```
+
+Ein Watch auf dieses Repository geht auch und ist reizvoll, weil es symmetrisch
+ist:
+
+```yaml
+watch:
+  - name: deckhand-itself
+    repo: marcwoge/deckhand
+    auth: none
+    trigger: { type: release }
+    path: /opt/deckhand-src
+    window: ["Sun 03:00-05:00"]
+    run:
+      - ["/opt/deckhand-src/current/scripts/install-release.sh", "--restart", "systemctl"]
+```
+
+Nur: dabei ersetzt das Deployment das, was es ausführt, und der Neustart des
+Dienstes beendet genau den Deploy-Schritt, der ihn auslöst. Es funktioniert — die
+Binary liegt vor dem Neustart schon an ihrem Platz —, aber der Audit-Eintrag
+dieses Deployments sieht wie ein Fehlschlag aus. Der Timer hat diese
+Umständlichkeit nicht.
+
+**Das Argument gegen automatische Updates überhaupt**, der Ehrlichkeit halber:
+ein Worker, der sich selbst aktualisiert, kann sich selbst kaputtmachen — und
+dann stehen alle Deployments dieser Maschine, bis sich jemand einloggt. Das ist
+schlimmer als eine etwas alte Version. Deshalb behält das Skript die alte
+Binary, prüft bevor es etwas ersetzt, rollt zurück wenn der Dienst nicht
+zurückkommt, und läuft nur, wenn du es anstößt.
+
 ## Zurück auf die alte Binary
 
 Die neuen Schlüssel sind Ergänzungen, das heißt aber auch: eine Konfiguration
 mit `token_command`, einem `auth:`-Block oder `${CREDENTIALS_DIRECTORY}` lädt
 auf einer älteren Binary **nicht**. Wenn du zurück musst, stelle die Sicherung
 der Konfiguration zusammen mit der Binary wieder her — `deckhand service
-install` behält nichts von deiner Konfiguration, und das Skript oben legt
-`deckhand.yaml.bak.<zeitstempel>` daneben ab.
+install` behält nichts von deiner Konfiguration, und
+`scripts/encrypt-credentials.sh` legt `deckhand.yaml.bak.<zeitstempel>` daneben
+ab. `install-release.sh` behält die alte Binary als `deckhand.<alte-version>`,
+der Weg zurück braucht also kein Netz:
+
+```bash
+sudo mv /usr/local/bin/deckhand.v0.1.0 /usr/local/bin/deckhand
+sudo systemctl restart deckhand
+```

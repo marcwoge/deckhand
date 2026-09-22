@@ -188,6 +188,7 @@ Complete apart from the two items still marked open.
 | Native Windows service (Service Control Manager) instead of a scheduled task | 📋 [#7](https://github.com/marcwoge/deckhand/issues/7) |
 | Packages: `.deb`, `.rpm`, Homebrew formula, Scoop manifest | 📋 [#8](https://github.com/marcwoge/deckhand/issues/8) |
 | Testing on real macOS and Windows machines | 📋 [#10](https://github.com/marcwoge/deckhand/issues/10) |
+| `scripts/install-release.sh` — verified update from outside | ✅ |
 | `deckhand self-update` from signed releases | 📋 [#15](https://github.com/marcwoge/deckhand/issues/15) |
 | Prometheus metrics endpoint bound to localhost | 💭 |
 | Optional inbound webhook mode for people who can expose a port | 💭 |

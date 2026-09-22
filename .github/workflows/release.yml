@@ -102,7 +102,13 @@ jobs:
             Each binary also carries [build provenance](https://github.com/marcwoge/deckhand/attestations):
 
             ```bash
-            gh attestation verify deckhand_linux_amd64 --repo marcwoge/deckhand
+            gh attestation verify deckhand_${{ github.ref_name }}_linux_amd64 --repo marcwoge/deckhand
+            ```
+
+            Updating an existing install, with all of the above done for you:
+
+            ```bash
+            sudo ./scripts/install-release.sh
             ```
 
             See the [README](https://github.com/marcwoge/deckhand#readme) ·
