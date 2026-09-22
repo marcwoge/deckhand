@@ -59,6 +59,7 @@ with signed checksums and build provenance.
 | `deckhand init` writes a commented starter config | ✅ |
 | `deckhand check` validates and warns about risky settings | ✅ |
 | Token from environment variable, file or (discouraged) inline | ✅ |
+| Per-watch credentials | 📋 [#14](https://github.com/marcwoge/deckhand/issues/14) |
 | GitHub App authentication with self-renewing installation tokens | ✅ |
 | GitHub Enterprise Server support (`github.api`, `github.host`) | ✅ |
 | Split configuration across an include directory | ✅ |
@@ -167,6 +168,7 @@ Complete apart from the two items still marked open.
 | Reload configuration without restarting (SIGHUP) | ✅ |
 | `deckhand doctor` — diagnose token scope, connectivity and permissions | ✅ |
 | Signed releases with build provenance | ✅ |
+| A credential per watch instead of one token for everything | 📋 [#14](https://github.com/marcwoge/deckhand/issues/14) |
 | `before:` commands and deploy stages | 📋 |
 | Private submodule support | 📋 |
 
@@ -177,6 +179,7 @@ Complete apart from the two items still marked open.
 | Native Windows service (Service Control Manager) instead of a scheduled task | 📋 [#7](https://github.com/marcwoge/deckhand/issues/7) |
 | Packages: `.deb`, `.rpm`, Homebrew formula, Scoop manifest | 📋 [#8](https://github.com/marcwoge/deckhand/issues/8) |
 | Testing on real macOS and Windows machines | 📋 [#10](https://github.com/marcwoge/deckhand/issues/10) |
+| `deckhand self-update` from signed releases | 📋 [#15](https://github.com/marcwoge/deckhand/issues/15) |
 | Prometheus metrics endpoint bound to localhost | 💭 |
 | Optional inbound webhook mode for people who can expose a port | 💭 |
 
