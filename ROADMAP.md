@@ -60,6 +60,7 @@ with signed checksums and build provenance.
 | `deckhand check` validates and warns about risky settings | ✅ |
 | Token from environment variable, file or (discouraged) inline | ✅ |
 | Per-watch credentials | 📋 [#14](https://github.com/marcwoge/deckhand/issues/14) |
+| Credentials from a secret manager, and TPM-bound at rest | 📋 [#16](https://github.com/marcwoge/deckhand/issues/16) |
 | GitHub App authentication with self-renewing installation tokens | ✅ |
 | GitHub Enterprise Server support (`github.api`, `github.host`) | ✅ |
 | Split configuration across an include directory | ✅ |
@@ -169,6 +170,8 @@ Complete apart from the two items still marked open.
 | `deckhand doctor` — diagnose token scope, connectivity and permissions | ✅ |
 | Signed releases with build provenance | ✅ |
 | A credential per watch instead of one token for everything | 📋 [#14](https://github.com/marcwoge/deckhand/issues/14) |
+| Credentials from a command (`pass`, Vault, 1Password, sops) | 📋 [#16](https://github.com/marcwoge/deckhand/issues/16) |
+| systemd-creds support, so secrets are TPM-bound at rest | 📋 [#16](https://github.com/marcwoge/deckhand/issues/16) |
 | `before:` commands and deploy stages | 📋 |
 | Private submodule support | 📋 |
 
