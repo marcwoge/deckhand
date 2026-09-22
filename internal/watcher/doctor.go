@@ -13,6 +13,7 @@ import (
 
 	"github.com/marcwoge/deckhand/internal/config"
 	"github.com/marcwoge/deckhand/internal/deploy"
+	"github.com/marcwoge/deckhand/internal/secret"
 	"github.com/marcwoge/deckhand/internal/telegram"
 )
 
@@ -170,7 +171,7 @@ func (e *Engine) checkNotifications(ctx context.Context, r *report) {
 		r.warn("no notification channel configured; failures would only appear in the log")
 	}
 	for _, ch := range e.cfg.Notify.Channels {
-		token, err := ch.ResolveToken()
+		token, err := secret.Resolve(ctx, ch.Spec())
 		if err != nil {
 			r.fail("%s: %v", ch.Type, err)
 			continue

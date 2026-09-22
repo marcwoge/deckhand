@@ -48,6 +48,101 @@ github:
 Deckhand refuses to read a `token_file` that others can read, and refuses to
 start at all with a config that group or others can write.
 
+`deckhand secrets` prints every credential, where it comes from and the
+permissions of each file — never a value:
+
+```
+$ deckhand secrets
+CREDENTIAL        SOURCE                          NOTE
+github token      command pass                    fetched from a secret manager
+watch shop        file /etc/deckhand/shop-token    mode 0600
+notify #1 (ntfy)  environment DECKHAND_NTFY       visible in /proc/<pid>/environ to root and this user
+```
+
+### Credentials at rest
+
+The honest starting point: **encrypting a credential with a key that sits on the
+same machine buys almost nothing.** Deckhand has to decrypt it unattended, so
+whoever can read the ciphertext can generally read the key too. "Encrypt the
+token file" looks safer while changing nothing.
+
+Three things do help, and Deckhand supports all three.
+
+**1. Fetch it from something that can revoke and audit.** Any credential can
+come from a command:
+
+```yaml
+github:
+  token_command: ["pass", "show", "deckhand/github"]
+  token_ttl: 1h                 # how long the value is reused, default 1h
+
+registry:
+  ghcr.io:
+    password_command: ["op", "read", "op://infra/ghcr/token"]
+
+notify:
+  channels:
+    - type: telegram
+      token_command: ["vault", "kv", "get", "-field=token", "secret/deckhand/telegram"]
+
+watch:
+  - name: shop
+    auth:
+      token_command: ["sops", "-d", "--extract", '["shop"]', "/etc/deckhand/secrets.yaml"]
+```
+
+That covers `pass`, gopass, the 1Password CLI, Bitwarden, Vault,
+`aws secretsmanager get-secret-value`, `sops`, `age`, or your own wrapper
+script — with no provider-specific code anywhere in Deckhand.
+
+How it behaves:
+
+* **Standard output is the credential** and is never logged. Standard error is
+  diagnostics and *is* shown when the command fails. A failing command reports
+  its program name and stderr, never its arguments — an argument can itself
+  contain the secret.
+* **The value is cached for `token_ttl`** (default one hour, and only the GitHub
+  credential is refreshed; registry and notification credentials are read once
+  at startup). Asking Vault before every request would be wasteful and would
+  make every deployment depend on the secret manager being up at that second.
+* **A failed refresh keeps the cached value** and logs it, so a brief outage of
+  the secret manager does not stop a deployment.
+* **The command runs at startup**, so a broken one fails `deckhand check` rather
+  than the first deployment. It is killed after 30 seconds.
+
+**2. Bind it to the machine with systemd-creds.** On Linux with systemd this is
+already solved, and Deckhand needs no code for it:
+
+```bash
+systemd-creds encrypt --name=github-token - /etc/deckhand/github-token.cred <<<"github_pat_..."
+```
+
+```ini
+[Service]
+LoadCredentialEncrypted=github-token:/etc/deckhand/github-token.cred
+```
+
+```yaml
+github:
+  token_file: ${CREDENTIALS_DIRECTORY}/github-token
+```
+
+systemd decrypts it to `$CREDENTIALS_DIRECTORY`, a tmpfs readable only by the
+service. This is the real thing: encrypted to the TPM or a host key, the file on
+disk is worthless if copied to another machine, and the plaintext never touches
+persistent storage. `deckhand service install` writes the exact commands for
+your configured credential files into the generated unit as comments.
+
+**3. Do not let another process read the memory.** Deckhand does this by itself:
+on Linux it clears `PR_SET_DUMPABLE` at startup, so another process running as
+the same user cannot attach to it and the kernel refuses a core dump. The
+generated systemd unit also sets `LimitCORE=0`.
+
+One thing worth knowing about `token_env`: an environment variable is **not**
+more private than a 0600 file. Anything that can read `/proc/<pid>/environ` —
+root, and processes of the same user — can read it. It is not a hole; it is just
+not the protection people assume.
+
 ## Authenticating as a GitHub App
 
 A personal access token is the quickest way to start, and for one machine with
@@ -209,6 +304,10 @@ You do not have to configure any of this:
 * Commands run as an argv vector without a shell unless you ask for one, and
   are killed together with their children when they exceed their timeout.
 * A watch that fails `failure_limit` times in a row halts instead of looping.
+* On Linux the process clears `PR_SET_DUMPABLE`, so a process of the same user
+  cannot attach to it and no core dump can be written.
+* A credential that comes from a command is never logged, and neither are the
+  command's arguments.
 
 ## Reporting a problem
 

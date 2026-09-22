@@ -68,7 +68,13 @@ type GitHub struct {
 	Token     string `yaml:"token"`
 	TokenEnv  string `yaml:"token_env"`
 	TokenFile string `yaml:"token_file"`
-	API       string `yaml:"api"`
+	// TokenCommand reads the token from a secret manager: pass, Vault, the
+	// 1Password CLI, sops, aws secretsmanager, a company wrapper script.
+	TokenCommand *Command `yaml:"token_command"`
+	// TokenTTL is how long a token from TokenCommand is reused before the
+	// command runs again. Default 1h.
+	TokenTTL Duration `yaml:"token_ttl"`
+	API      string   `yaml:"api"`
 	// Host is the git host used for cloning; change it for GitHub Enterprise.
 	Host string `yaml:"host"`
 
@@ -88,15 +94,22 @@ type GitHubApp struct {
 	// want when the app is installed in more than one account.
 	InstallationID int64 `yaml:"installation_id"`
 
-	PrivateKey     string `yaml:"private_key"`
-	PrivateKeyFile string `yaml:"private_key_file"`
-	PrivateKeyEnv  string `yaml:"private_key_env"`
+	PrivateKey        string   `yaml:"private_key"`
+	PrivateKeyFile    string   `yaml:"private_key_file"`
+	PrivateKeyEnv     string   `yaml:"private_key_env"`
+	PrivateKeyCommand *Command `yaml:"private_key_command"`
+}
+
+// KeySpec names where the private key comes from.
+func (a *GitHubApp) KeySpec() SecretSpec {
+	return SecretSpec{What: "github.app private_key", Inline: a.PrivateKey,
+		Env: a.PrivateKeyEnv, File: a.PrivateKeyFile, Command: a.PrivateKeyCommand}
 }
 
 // ResolvePrivateKey reads the PEM key from its configured source, refusing one
 // that others can read.
 func (a *GitHubApp) ResolvePrivateKey() ([]byte, error) {
-	key, err := resolveSecret(a.PrivateKey, a.PrivateKeyEnv, a.PrivateKeyFile)
+	key, err := a.KeySpec().Resolve()
 	if err != nil {
 		return nil, err
 	}
@@ -129,9 +142,10 @@ type Channel struct {
 	URL  string `yaml:"url"`
 
 	// Credentials. Prefer token_env or token_file over an inline token.
-	Token     string `yaml:"token"`
-	TokenEnv  string `yaml:"token_env"`
-	TokenFile string `yaml:"token_file"`
+	Token        string   `yaml:"token"`
+	TokenEnv     string   `yaml:"token_env"`
+	TokenFile    string   `yaml:"token_file"`
+	TokenCommand *Command `yaml:"token_command"`
 
 	// Telegram only.
 	ChatID   string `yaml:"chat_id"`
@@ -218,9 +232,11 @@ type WatchAuth struct {
 	Mode string `yaml:"mode"`
 
 	// A credential for this watch only. Empty means the global one.
-	Token     string `yaml:"token"`
-	TokenEnv  string `yaml:"token_env"`
-	TokenFile string `yaml:"token_file"`
+	Token        string   `yaml:"token"`
+	TokenEnv     string   `yaml:"token_env"`
+	TokenFile    string   `yaml:"token_file"`
+	TokenCommand *Command `yaml:"token_command"`
+	TokenTTL     Duration `yaml:"token_ttl"`
 
 	// App is a GitHub App installation for this watch only, for a machine
 	// watching repositories covered by different apps.
@@ -257,9 +273,7 @@ func (a WatchAuth) Anonymous() bool { return a.Mode == "none" }
 
 // Own reports whether this watch brings its own credential rather than using
 // the global one.
-func (a WatchAuth) Own() bool {
-	return a.Token != "" || a.TokenEnv != "" || a.TokenFile != "" || a.App != nil
-}
+func (a WatchAuth) Own() bool { return a.Spec().Set() || a.App != nil }
 
 // Describe names the credential source, for "check" and "doctor". It never
 // prints a value.
@@ -269,12 +283,8 @@ func (a WatchAuth) Describe() string {
 		return "none"
 	case a.App != nil:
 		return "app " + a.App.ID
-	case a.TokenFile != "":
-		return "token_file " + a.TokenFile
-	case a.TokenEnv != "":
-		return "token_env " + a.TokenEnv
-	case a.Token != "":
-		return "inline token"
+	case a.Spec().Set():
+		return a.Spec().Describe()
 	}
 	return "token (global)"
 }
@@ -282,7 +292,7 @@ func (a WatchAuth) Describe() string {
 // ResolveToken reads this watch's own credential. It is only called when Own
 // reports true.
 func (a WatchAuth) ResolveToken() (string, error) {
-	return resolveSecret(a.Token, a.TokenEnv, a.TokenFile)
+	return a.Spec().Resolve()
 }
 
 // validate checks one watch credential.
@@ -296,29 +306,35 @@ func (a *WatchAuth) validate() error {
 	if a.Mode == "none" && a.Own() {
 		return fmt.Errorf("auth is \"none\" and also names a credential; pick one")
 	}
-	sources := 0
-	for _, set := range []bool{a.Token != "", a.TokenEnv != "", a.TokenFile != "", a.App != nil} {
-		if set {
-			sources++
-		}
+	if a.Spec().Set() && a.App != nil {
+		return fmt.Errorf("auth has both a token and an app; pick one")
 	}
-	if sources > 1 {
-		return fmt.Errorf("auth has several credential sources; pick one")
+	if err := a.Spec().validate(); err != nil {
+		return err
 	}
 	if a.App != nil {
 		if a.App.ID == "" {
 			return fmt.Errorf("auth.app needs an id")
 		}
-		if _, err := a.App.ResolvePrivateKey(); err != nil {
-			return fmt.Errorf("auth.app: %w", err)
+		if err := a.App.KeySpec().validate(); err != nil {
+			return err
+		}
+		if !a.App.KeySpec().FromCommand() {
+			if _, err := a.App.ResolvePrivateKey(); err != nil {
+				return fmt.Errorf("auth.app: %w", err)
+			}
 		}
 		if a.App.InstallationID < 0 {
 			return fmt.Errorf("auth.app installation_id cannot be negative")
 		}
 	}
-	if a.TokenFile != "" || a.TokenEnv != "" || a.Token != "" {
-		// Fail at startup rather than at the first deployment: a token file
-		// others can read is refused here, exactly as the global one is.
+	// A credential from a command cannot be checked here - running a
+	// subprocess during parsing is the wrong place, and internal/secret
+	// cannot be imported from this package. It is executed at startup
+	// instead, which is early enough to fail before any deployment.
+	if !a.Spec().FromCommand() && a.Spec().Set() {
+		// A token file others can read is refused here, exactly as the global
+		// one is.
 		if _, err := a.ResolveToken(); err != nil {
 			return fmt.Errorf("auth: %w", err)
 		}
@@ -328,15 +344,22 @@ func (a *WatchAuth) validate() error {
 
 // RegistryAuth is the pull credential for one registry host.
 type RegistryAuth struct {
-	Username     string `yaml:"username"`
-	Password     string `yaml:"password"`
-	PasswordEnv  string `yaml:"password_env"`
-	PasswordFile string `yaml:"password_file"`
+	Username        string   `yaml:"username"`
+	Password        string   `yaml:"password"`
+	PasswordEnv     string   `yaml:"password_env"`
+	PasswordFile    string   `yaml:"password_file"`
+	PasswordCommand *Command `yaml:"password_command"`
+}
+
+// Spec names where the registry password comes from.
+func (r *RegistryAuth) Spec() SecretSpec {
+	return SecretSpec{What: "registry password", Inline: r.Password,
+		Env: r.PasswordEnv, File: r.PasswordFile, Command: r.PasswordCommand}
 }
 
 // ResolvePassword reads the registry credential from its configured source.
 func (r *RegistryAuth) ResolvePassword() (string, error) {
-	return resolveSecret(r.Password, r.PasswordEnv, r.PasswordFile)
+	return r.Spec().Resolve()
 }
 
 // Verify holds optional supply-chain checks.
@@ -377,6 +400,20 @@ type Command struct {
 	Dir     string            `yaml:"dir"`
 	Timeout Duration          `yaml:"timeout"`
 	Env     map[string]string `yaml:"env"`
+}
+
+// Label names a command without repeating its arguments. It exists for
+// credential commands: an argument can itself contain the credential (think
+// sh -c "echo $TOKEN"), so only the program is safe to print in a log or an
+// error message.
+func (c Command) Label() string {
+	if c.Shell != "" {
+		return "shell credential command"
+	}
+	if len(c.Cmd) > 0 {
+		return filepath.Base(c.Cmd[0])
+	}
+	return "credential command"
 }
 
 func (c *Command) UnmarshalYAML(value *yaml.Node) error {
@@ -582,22 +619,31 @@ func (c *Config) normalise() error {
 				sources++
 			}
 		}
+		if app.PrivateKeyCommand != nil {
+			sources++
+		}
 		switch sources {
 		case 0:
-			return fmt.Errorf("github.app needs private_key_file (preferred), private_key_env or private_key")
+			return fmt.Errorf("github.app needs private_key_file (preferred), " +
+				"private_key_command, private_key_env or private_key")
 		case 1:
 		default:
 			return fmt.Errorf("github.app has several private key sources; pick one")
 		}
-		if _, err := app.ResolvePrivateKey(); err != nil {
-			return fmt.Errorf("github.app: %w", err)
+		if !app.KeySpec().FromCommand() {
+			if _, err := app.ResolvePrivateKey(); err != nil {
+				return fmt.Errorf("github.app: %w", err)
+			}
 		}
-		if c.GitHub.Token != "" || c.GitHub.TokenEnv != "" || c.GitHub.TokenFile != "" {
+		if c.GitHub.TokenSpec().Set() {
 			return fmt.Errorf("github has both a personal token and an app configured; pick one")
 		}
 		if app.InstallationID < 0 {
 			return fmt.Errorf("github.app installation_id cannot be negative")
 		}
+	}
+	if err := c.GitHub.TokenSpec().validate(); err != nil {
+		return err
 	}
 	if c.Notify.Format == "" {
 		c.Notify.Format = "json"
@@ -615,8 +661,13 @@ func (c *Config) normalise() error {
 		if host == "" {
 			return fmt.Errorf("registry entry without a host name")
 		}
-		if _, err := auth.ResolvePassword(); err != nil {
+		if err := auth.Spec().validate(); err != nil {
 			return fmt.Errorf("registry %s: %w", host, err)
+		}
+		if !auth.Spec().FromCommand() {
+			if _, err := auth.ResolvePassword(); err != nil {
+				return fmt.Errorf("registry %s: %w", host, err)
+			}
 		}
 	}
 	if len(c.Watches) == 0 {
@@ -816,12 +867,17 @@ func (n *Notify) normalise() error {
 		default:
 			return fmt.Errorf("channel #%d: unknown type %q", i+1, ch.Type)
 		}
-		if _, err := ch.ResolveToken(); err != nil {
+		if err := ch.Spec().validate(); err != nil {
 			return fmt.Errorf("channel #%d: %w", i+1, err)
 		}
-		if ch.Type == "telegram" {
-			if tok, _ := ch.ResolveToken(); tok == "" {
-				return fmt.Errorf("channel #%d (telegram) needs a bot token", i+1)
+		if !ch.Spec().FromCommand() {
+			if _, err := ch.ResolveToken(); err != nil {
+				return fmt.Errorf("channel #%d: %w", i+1, err)
+			}
+			if ch.Type == "telegram" {
+				if tok, _ := ch.ResolveToken(); tok == "" {
+					return fmt.Errorf("channel #%d (telegram) needs a bot token", i+1)
+				}
 			}
 		}
 		for event, prio := range ch.Priority {
@@ -848,7 +904,7 @@ func (n *Notify) CommandChannel() *Channel {
 
 // ResolveToken reads the channel credential from its configured source.
 func (c *Channel) ResolveToken() (string, error) {
-	return resolveSecret(c.Token, c.TokenEnv, c.TokenFile)
+	return c.Spec().Resolve()
 }
 
 // Events returns the event list this channel reacts to, falling back to the
@@ -921,7 +977,7 @@ func (w *Watch) StateDir(defaultDir string) string {
 // Token resolves the GitHub token from the configured source. It returns an
 // empty string when no token is configured, which is valid for public repos.
 func (g GitHub) ResolveToken() (string, error) {
-	secret, err := resolveSecret(g.Token, g.TokenEnv, g.TokenFile)
+	secret, err := g.TokenSpec().Resolve()
 	if err != nil {
 		return "", err
 	}
@@ -931,22 +987,117 @@ func (g GitHub) ResolveToken() (string, error) {
 	return secret, nil
 }
 
+// SecretSpec names where one credential comes from. It exists so that every
+// credential - GitHub token, app key, registry password, bot token - offers the
+// same four sources without repeating the logic four times.
+//
+// The command is not executed here: running a subprocess belongs in
+// internal/secret, which cannot be imported from this package without a cycle.
+type SecretSpec struct {
+	// What names the setting in error messages, e.g. "github.token".
+	What    string
+	Inline  string
+	Env     string
+	File    string
+	Command *Command
+	// TTL is how long a value from Command is reused. Zero means the default.
+	TTL time.Duration
+}
+
+// FromCommand reports whether this credential comes from a command.
+func (s SecretSpec) FromCommand() bool { return s.Command != nil }
+
+// Set reports whether any source is configured at all.
+func (s SecretSpec) Set() bool {
+	return s.Inline != "" || s.Env != "" || s.File != "" || s.Command != nil
+}
+
+// Describe names the source without ever printing the value.
+func (s SecretSpec) Describe() string {
+	switch {
+	case s.Command != nil:
+		return "command " + s.Command.Label()
+	case s.File != "":
+		return "file " + os.ExpandEnv(s.File)
+	case s.Env != "":
+		return "environment " + s.Env
+	case s.Inline != "":
+		return "inline in the config file"
+	}
+	return "not configured"
+}
+
+// Resolve reads the credential from a file, an environment variable or an
+// inline value. A command is not run here - callers that support one use
+// internal/secret.
+func (s SecretSpec) Resolve() (string, error) {
+	return resolveSecretNamed(s.What, s.Inline, s.Env, s.File)
+}
+
+// validate checks the shape of a credential: one source, and a usable command.
+func (s SecretSpec) validate() error {
+	sources := 0
+	for _, set := range []bool{s.Inline != "", s.Env != "", s.File != "", s.Command != nil} {
+		if set {
+			sources++
+		}
+	}
+	if sources > 1 {
+		return fmt.Errorf("%s has several sources; pick one", s.What)
+	}
+	if s.Command != nil {
+		if len(s.Command.Cmd) == 0 && s.Command.Shell == "" {
+			return fmt.Errorf("%s_command needs either a command list or \"shell\"", s.What)
+		}
+	}
+	if s.TTL < 0 {
+		return fmt.Errorf("%s ttl cannot be negative", s.What)
+	}
+	return nil
+}
+
+// TokenSpec names where the GitHub token comes from.
+func (g GitHub) TokenSpec() SecretSpec {
+	return SecretSpec{What: "github.token", Inline: g.Token, Env: g.TokenEnv,
+		File: g.TokenFile, Command: g.TokenCommand, TTL: time.Duration(g.TokenTTL)}
+}
+
+// Spec names where this watch's own credential comes from.
+func (a WatchAuth) Spec() SecretSpec {
+	return SecretSpec{What: "auth.token", Inline: a.Token, Env: a.TokenEnv,
+		File: a.TokenFile, Command: a.TokenCommand, TTL: time.Duration(a.TokenTTL)}
+}
+
+// Spec names where the channel token comes from.
+func (c *Channel) Spec() SecretSpec {
+	return SecretSpec{What: "channel token", Inline: c.Token, Env: c.TokenEnv,
+		File: c.TokenFile, Command: c.TokenCommand}
+}
+
 // resolveSecret reads a credential from a file, an environment variable or an
 // inline value, in that order of preference. A file that others can read is
 // refused rather than used.
 func resolveSecret(inline, env, file string) (string, error) {
+	return resolveSecretNamed("token", inline, env, file)
+}
+
+func resolveSecretNamed(what, inline, env, file string) (string, error) {
 	if file != "" {
+		// Expanding the environment makes systemd's
+		// ${CREDENTIALS_DIRECTORY} usable, which is how a credential can be
+		// encrypted at rest and never touch persistent storage in plaintext.
+		file = os.ExpandEnv(file)
 		info, err := os.Stat(file)
 		if err != nil {
-			return "", fmt.Errorf("token_file: %w", err)
+			return "", fmt.Errorf("%s_file: %w", what, err)
 		}
 		if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
-			return "", fmt.Errorf("token_file %s is readable by others (mode %04o); run: chmod 600 %s",
-				file, info.Mode().Perm(), file)
+			return "", fmt.Errorf("%s_file %s is readable by others (mode %04o); run: chmod 600 %s",
+				what, file, info.Mode().Perm(), file)
 		}
 		b, err := os.ReadFile(file)
 		if err != nil {
-			return "", fmt.Errorf("token_file: %w", err)
+			return "", fmt.Errorf("%s_file: %w", what, err)
 		}
 		return strings.TrimSpace(string(b)), nil
 	}

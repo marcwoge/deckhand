@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func write(t *testing.T, body string) string {
@@ -581,5 +582,85 @@ watch:
 		if _, err := Load(write(t, body)); err == nil {
 			t.Errorf("%s: must be refused", name)
 		}
+	}
+}
+
+// systemd decrypts LoadCredentialEncrypted into $CREDENTIALS_DIRECTORY, a tmpfs
+// only the service can read. Pointing the configuration at it is the one way to
+// have a credential encrypted at rest without Deckhand holding the key, so the
+// variable has to be expanded in a path.
+func TestCredentialsDirectoryIsExpanded(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CREDENTIALS_DIRECTORY", dir)
+	if err := os.WriteFile(filepath.Join(dir, "github-token"), []byte("ghp_tpm\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(write(t, `
+version: 1
+github:
+  token_file: ${CREDENTIALS_DIRECTORY}/github-token
+watch:
+  - name: a
+    repo: acme/a
+    trigger: { type: release }
+    path: /tmp/deckhand-test-a
+    run: [["true"]]
+`))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	got, err := cfg.GitHub.ResolveToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "ghp_tpm" {
+		t.Errorf("token = %q, want the one from the credentials directory", got)
+	}
+}
+
+// A credential command cannot be validated while parsing, but its shape can.
+func TestTokenCommandValidation(t *testing.T) {
+	if _, err := Load(write(t, `
+version: 1
+github:
+  token_env: A
+  token_command: ["pass", "show", "deckhand/github"]
+watch:
+  - name: a
+    repo: acme/a
+    trigger: { type: release }
+    path: /tmp/deckhand-test-a
+    run: [["true"]]
+`)); err == nil {
+		t.Error("a token from two sources must be refused")
+	}
+
+	cfg, err := Load(write(t, `
+version: 1
+github:
+  token_command: ["pass", "show", "deckhand/github"]
+  token_ttl: 15m
+watch:
+  - name: a
+    repo: acme/a
+    trigger: { type: release }
+    path: /tmp/deckhand-test-a
+    run: [["true"]]
+`))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	spec := cfg.GitHub.TokenSpec()
+	if !spec.FromCommand() {
+		t.Error("the spec must report a command source")
+	}
+	if spec.TTL != 15*time.Minute {
+		t.Errorf("ttl = %s, want 15m", spec.TTL)
+	}
+	// Describe goes into logs and check output, and an argument can itself be
+	// the credential.
+	if strings.Contains(spec.Describe(), "deckhand/github") {
+		t.Errorf("describe = %q, want the arguments left out", spec.Describe())
 	}
 }

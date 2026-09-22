@@ -16,6 +16,8 @@ import (
 	"syscall"
 
 	"github.com/marcwoge/deckhand/internal/config"
+	"github.com/marcwoge/deckhand/internal/hardening"
+	"github.com/marcwoge/deckhand/internal/secret"
 	"github.com/marcwoge/deckhand/internal/service"
 	"github.com/marcwoge/deckhand/internal/watcher"
 )
@@ -34,6 +36,7 @@ Usage:
   deckhand rollback <watch>                 go back to the previous revision
   deckhand history [watch] [--limit N]      show the audit log
   deckhand pause [reason] | resume [watch]  hold or release all deployments
+  deckhand secrets [--config FILE]          where every credential comes from
   deckhand service install|uninstall        install as a system service
   deckhand init [--config FILE]             write a commented example config
   deckhand version
@@ -78,6 +81,8 @@ func main() {
 		err = cmdPause(args)
 	case "resume":
 		err = cmdResume(args)
+	case "secrets":
+		err = cmdSecrets(args)
 	case "service":
 		err = cmdService(args)
 	case "init":
@@ -159,6 +164,12 @@ func cmdRun(args []string) error {
 		return errors.New("refusing to run as root: create a dedicated service user " +
 			"(see docs/en/security.md), or pass --allow-root if you really mean it")
 	}
+	// Before any credential is read: another process of the same user must not
+	// be able to attach to this one, and a crash must not write the tokens into
+	// a core dump.
+	if err := hardening.Apply(); err != nil {
+		log.Printf("warning: could not harden the process: %v", err)
+	}
 	eng, cfg, err := newEngine(*cfgPath)
 	if err != nil {
 		return err
@@ -228,7 +239,7 @@ func printNotifications(cfg *config.Config) {
 				target += ", commands enabled"
 			}
 		}
-		token, _ := ch.ResolveToken()
+		token, _ := secret.Resolve(context.Background(), ch.Spec())
 		auth := ""
 		if token != "" {
 			auth = ", authenticated"
@@ -500,7 +511,7 @@ func cmdService(args []string) error {
 		return err
 	}
 	p := service.Params{Config: cfg.Path, User: *user, SystemWide: *system,
-		StateDir: cfg.Defaults.StateDir}
+		StateDir: cfg.Defaults.StateDir, CredentialFiles: credentialFiles(cfg)}
 	switch action {
 	case "install":
 		return service.Install(p, os.Stdout)

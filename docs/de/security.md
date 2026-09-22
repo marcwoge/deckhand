@@ -51,6 +51,106 @@ Deckhand weigert sich, eine `token_file` zu lesen, die andere lesen können, und
 startet gar nicht erst mit einer Konfiguration, die Gruppe oder andere
 beschreiben dürfen.
 
+`deckhand secrets` zeigt jedes Credential, seine Quelle und die Rechte jeder
+Datei — nie einen Wert:
+
+```
+$ deckhand secrets
+CREDENTIAL        SOURCE                          NOTE
+github token      command pass                    fetched from a secret manager
+watch shop        file /etc/deckhand/shop-token    mode 0600
+notify #1 (ntfy)  environment DECKHAND_NTFY       visible in /proc/<pid>/environ to root and this user
+```
+
+### Credentials im Ruhezustand
+
+Der ehrliche Ausgangspunkt: **ein Credential mit einem Schlüssel zu
+verschlüsseln, der auf derselben Maschine liegt, bringt fast nichts.** Deckhand
+muss es unbeaufsichtigt entschlüsseln, also kann wer den Geheimtext lesen kann
+in der Regel auch den Schlüssel lesen. „Token-Datei verschlüsseln“ sieht
+sicherer aus und ändert nichts.
+
+Drei Dinge helfen wirklich, und Deckhand unterstützt alle drei.
+
+**1. Aus etwas holen, das widerrufen und protokollieren kann.** Jedes Credential
+kann aus einem Kommando kommen:
+
+```yaml
+github:
+  token_command: ["pass", "show", "deckhand/github"]
+  token_ttl: 1h                 # wie lange der Wert wiederverwendet wird, Standard 1h
+
+registry:
+  ghcr.io:
+    password_command: ["op", "read", "op://infra/ghcr/token"]
+
+notify:
+  channels:
+    - type: telegram
+      token_command: ["vault", "kv", "get", "-field=token", "secret/deckhand/telegram"]
+
+watch:
+  - name: shop
+    auth:
+      token_command: ["sops", "-d", "--extract", '["shop"]', "/etc/deckhand/secrets.yaml"]
+```
+
+Damit funktionieren `pass`, gopass, das 1Password-CLI, Bitwarden, Vault,
+`aws secretsmanager get-secret-value`, `sops`, `age` oder ein eigenes
+Wrapper-Skript — ohne eine Zeile anbieterspezifischen Code in Deckhand.
+
+Wie es sich verhält:
+
+* **Standardausgabe ist das Credential** und wird nie geloggt. Standardfehler
+  ist die Diagnose und *wird* gezeigt, wenn das Kommando scheitert. Ein
+  Fehlschlag nennt Programmname und stderr, nie die Argumente — ein Argument
+  kann selbst das Geheimnis enthalten.
+* **Der Wert wird für `token_ttl` gecacht** (Standard eine Stunde; aktualisiert
+  wird nur das GitHub-Credential, Registry- und Benachrichtigungs-Credentials
+  werden einmal beim Start gelesen). Vault vor jeder Anfrage zu fragen wäre
+  Verschwendung und würde jedes Deployment davon abhängig machen, dass der
+  Secret-Manager in genau dieser Sekunde läuft.
+* **Eine gescheiterte Aktualisierung behält den gecachten Wert** und meldet das,
+  damit ein kurzer Ausfall des Secret-Managers kein Deployment verhindert.
+* **Das Kommando läuft beim Start**, ein kaputtes scheitert also bei
+  `deckhand check` und nicht beim ersten Deployment. Nach 30 Sekunden wird es
+  beendet.
+
+**2. An die Maschine binden mit systemd-creds.** Unter Linux mit systemd ist das
+bereits gelöst, und Deckhand braucht dafür keinen Code:
+
+```bash
+systemd-creds encrypt --name=github-token - /etc/deckhand/github-token.cred <<<"github_pat_..."
+```
+
+```ini
+[Service]
+LoadCredentialEncrypted=github-token:/etc/deckhand/github-token.cred
+```
+
+```yaml
+github:
+  token_file: ${CREDENTIALS_DIRECTORY}/github-token
+```
+
+systemd entschlüsselt es nach `$CREDENTIALS_DIRECTORY`, ein tmpfs, das nur der
+Dienst lesen kann. Das ist echter Schutz: an TPM oder Host-Schlüssel gebunden
+ist die Datei auf einer anderen Maschine wertlos, und der Klartext landet nie
+auf dauerhaftem Speicher. `deckhand service install` schreibt die passenden
+Kommandos für die konfigurierten Credential-Dateien als Kommentare in die
+erzeugte Unit.
+
+**3. Andere Prozesse nicht in den Speicher schauen lassen.** Das macht Deckhand
+von selbst: unter Linux wird beim Start `PR_SET_DUMPABLE` gelöscht, damit ein
+anderer Prozess desselben Benutzers sich nicht anhängen kann und der Kernel
+keinen Core-Dump schreibt. Die erzeugte systemd-Unit setzt zusätzlich
+`LimitCORE=0`.
+
+Eines noch zu `token_env`: eine Umgebungsvariable ist **nicht** privater als
+eine 0600-Datei. Alles, was `/proc/<pid>/environ` lesen kann — root und Prozesse
+desselben Benutzers — liest sie mit. Das ist kein Loch, nur nicht der Schutz,
+den man annimmt.
+
 ## Anmeldung als GitHub App
 
 Ein Personal Access Token ist der schnellste Weg, und für eine Maschine mit
@@ -220,6 +320,10 @@ Davon musst du nichts konfigurieren:
   eine anforderst, und werden bei Zeitüberschreitung samt Kindprozessen beendet.
 * Ein Watch, der `failure_limit` Mal hintereinander scheitert, stoppt sich
   selbst, statt in einer Schleife zu kreisen.
+* Unter Linux löscht der Prozess `PR_SET_DUMPABLE`: kein Prozess desselben
+  Benutzers kann sich anhängen, und es kann kein Core-Dump geschrieben werden.
+* Ein Credential aus einem Kommando wird nie geloggt, und die Argumente des
+  Kommandos auch nicht.
 
 ## Ein Problem melden
 

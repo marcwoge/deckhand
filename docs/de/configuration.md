@@ -80,6 +80,7 @@ Ist `include` nicht gesetzt und liegt neben der Konfiguration ein Verzeichnis
 | `api` | Basis-URL der API. Für GitHub Enterprise Server ändern, z. B. `https://ghe.example.com/api/v3`. |
 | `host` | Git-Host zum Klonen. Standard `github.com`. |
 | `app` | Als GitHub App anmelden statt mit einem Personal Access Token. Siehe [security.md](security.md#anmeldung-als-github-app). |
+| `token_command` | Token aus einem Secret-Manager lesen (`pass`, Vault, 1Password, sops, …). `token_ttl` legt fest, wie lange der Wert wiederverwendet wird, Standard 1h. Siehe [security.md](security.md#credentials-im-ruhezustand). |
 
 Ist keine der drei Token-Angaben gesetzt, wird `$DECKHAND_GITHUB_TOKEN`
 verwendet.

@@ -44,6 +44,8 @@ func TestSystemdUnitIsHardened(t *testing.T) {
 		"NoNewPrivileges=yes", "PrivateTmp=yes", "ProtectSystem=full",
 		"ProtectHome=read-only", "RestrictSUIDSGID=yes",
 		"ExecReload=/bin/kill -HUP $MAINPID", "Restart=always",
+		// A core dump of a process holding deployment tokens writes them to disk.
+		"LimitCORE=0",
 	} {
 		if !strings.Contains(systemdUnit, want) {
 			t.Errorf("the unit is missing %q", want)
@@ -72,5 +74,37 @@ func TestCurrentUserAlwaysNamesSomething(t *testing.T) {
 	t.Setenv("USER", "deckhand")
 	if got := currentUser(); got != "deckhand" {
 		t.Errorf("currentUser() = %q, want deckhand", got)
+	}
+}
+
+// A credential file in the configuration should not go unmentioned: on a
+// machine with a TPM it can be encrypted at rest, and the unit is where the
+// operator will look.
+func TestCredentialSectionOffersSystemdCreds(t *testing.T) {
+	if got := credentialSection(nil); got != "" {
+		t.Errorf("no credential files must produce no section, got %q", got)
+	}
+
+	got := credentialSection(map[string]string{
+		"github-token":   "/etc/deckhand/github-token",
+		"notify-1-token": "/etc/deckhand/telegram-token",
+	})
+	for _, want := range []string{
+		"systemd-creds encrypt --name=github-token /etc/deckhand/github-token",
+		"LoadCredentialEncrypted=github-token:/etc/deckhand/github-token.cred",
+		"LoadCredentialEncrypted=notify-1-token:/etc/deckhand/notify-1-token.cred",
+		"${CREDENTIALS_DIRECTORY}",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the hint is missing %q:\n%s", want, got)
+		}
+	}
+	// Every line must be a comment: an uncommented LoadCredentialEncrypted
+	// would point at a file that does not exist yet and stop the service from
+	// starting at all.
+	for _, line := range strings.Split(strings.TrimRight(got, "\n"), "\n") {
+		if !strings.HasPrefix(line, "#") {
+			t.Errorf("line %q is not commented out", line)
+		}
 	}
 }

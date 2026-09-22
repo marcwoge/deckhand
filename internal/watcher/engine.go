@@ -4,6 +4,7 @@ package watcher
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"github.com/marcwoge/deckhand/internal/heartbeat"
 	"github.com/marcwoge/deckhand/internal/notify"
 	"github.com/marcwoge/deckhand/internal/registry"
+	"github.com/marcwoge/deckhand/internal/secret"
 )
 
 // Engine owns every watch in a config.
@@ -75,7 +77,11 @@ type Options struct {
 
 // New builds an Engine from a validated config.
 func New(cfg *config.Config, o Options) (*Engine, error) {
-	token, app, description, err := buildTokenSource(cfg)
+	logf := o.Logf
+	if logf == nil {
+		logf = func(string, string, ...interface{}) {}
+	}
+	token, app, description, err := buildTokenSource(cfg, logf)
 	if err != nil {
 		return nil, err
 	}
@@ -86,10 +92,6 @@ func New(cfg *config.Config, o Options) (*Engine, error) {
 	if stateDir == "" {
 		stateDir = DefaultStateDir()
 	}
-	logf := o.Logf
-	if logf == nil {
-		logf = func(string, string, ...interface{}) {}
-	}
 	al, err := audit.Open(stateDir, cfg.Defaults.Audit.MaxSize.B(10<<20), cfg.Defaults.Audit.Keep)
 	if err != nil {
 		return nil, fmt.Errorf("audit log: %w", err)
@@ -97,7 +99,9 @@ func New(cfg *config.Config, o Options) (*Engine, error) {
 	host, _ := os.Hostname()
 	creds := map[string]registry.Credential{}
 	for hostName, auth := range cfg.Registry {
-		password, err := auth.ResolvePassword()
+		// A registry password may come from a secret manager, so this can run a
+		// command. It happens once, at startup.
+		password, err := secret.Resolve(context.Background(), auth.Spec())
 		if err != nil {
 			return nil, fmt.Errorf("registry %s: %w", hostName, err)
 		}
@@ -126,17 +130,8 @@ func New(cfg *config.Config, o Options) (*Engine, error) {
 	// A watch may bring its own credential, so that one token does not have to
 	// reach every watched repository. Resolving them here means a bad token
 	// file is reported at startup, not at the first deployment.
-	for _, w := range cfg.Watches {
-		if !w.Auth.Own() {
-			continue
-		}
-		source, description, err := buildWatchTokenSource(cfg, w)
-		if err != nil {
-			return nil, fmt.Errorf("watch %q: %w", w.Name, err)
-		}
-		e.watchTokens[w.Name] = source
-		e.watchClient[w.Name] = gh.New(cfg.GitHub.API, source)
-		e.watchAuth[w.Name] = description
+	if err := e.buildWatchCredentials(cfg); err != nil {
+		return nil, err
 	}
 	if notifyErr != nil {
 		// A broken notification channel is worth complaining about loudly, but
@@ -149,9 +144,10 @@ func New(cfg *config.Config, o Options) (*Engine, error) {
 // buildWatchTokenSource builds the credential for a single watch. It mirrors
 // buildTokenSource but never falls back to the global credential: a watch that
 // names its own credential must use that one or fail.
-func buildWatchTokenSource(cfg *config.Config, w *config.Watch) (gh.TokenSource, string, error) {
+func buildWatchTokenSource(cfg *config.Config, w *config.Watch,
+	logf func(watch, format string, args ...interface{})) (gh.TokenSource, string, error) {
 	if app := w.Auth.App; app != nil {
-		key, err := app.ResolvePrivateKey()
+		key, err := appKey(app)
 		if err != nil {
 			return nil, "", fmt.Errorf("auth.app: %w", err)
 		}
@@ -165,24 +161,83 @@ func buildWatchTokenSource(cfg *config.Config, w *config.Watch) (gh.TokenSource,
 		}
 		return auth.TokenFor, fmt.Sprintf("GitHub App %s (%s)", app.ID, where), nil
 	}
-	token, err := w.Auth.ResolveToken()
+	spec := w.Auth.Spec()
+	source := secret.New(spec, func(format string, args ...interface{}) {
+		logf(w.Name, format, args...)
+	})
+	// Resolve once now so a broken credential is reported at startup rather
+	// than at the first deployment.
+	token, err := source.Get(context.Background())
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("auth: %w", err)
 	}
 	if token == "" {
 		// An empty per-watch credential is a configuration mistake, not a
 		// reason to silently fall back to a broader one.
 		return nil, "", fmt.Errorf("auth names a credential (%s) that is empty", w.Auth.Describe())
 	}
-	return gh.StaticToken(token), "own " + w.Auth.Describe(), nil
+	return tokenSource(source), "own " + w.Auth.Describe(), nil
+}
+
+// buildWatchCredentials resolves every per-watch credential and replaces the
+// previous set, so a reload cannot leave a removed watch's credential behind.
+func (e *Engine) buildWatchCredentials(cfg *config.Config) error {
+	tokens := map[string]gh.TokenSource{}
+	clients := map[string]*gh.Client{}
+	descriptions := map[string]string{}
+	var problems []string
+	for _, w := range cfg.Watches {
+		if !w.Auth.Own() {
+			continue
+		}
+		source, description, err := buildWatchTokenSource(cfg, w, e.logf)
+		if err != nil {
+			// Startup refuses to continue on this error. A reload cannot, so
+			// the watch gets a credential that fails loudly: keeping the
+			// previous one, or falling back to the global one, would use a
+			// credential the operator has just replaced.
+			problems = append(problems, fmt.Sprintf("watch %q: %v", w.Name, err))
+			failure := err
+			source = func(context.Context, string) (string, error) { return "", failure }
+			description = "unusable (" + err.Error() + ")"
+		}
+		tokens[w.Name] = source
+		clients[w.Name] = gh.New(cfg.GitHub.API, source)
+		descriptions[w.Name] = description
+	}
+	e.watchTokens, e.watchClient, e.watchAuth = tokens, clients, descriptions
+	if len(problems) > 0 {
+		return errors.New(strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+// tokenSource adapts a credential to gh.TokenSource, which is asked per
+// repository. A personal token is the same for every repository; only an app
+// credential differs, and that has its own source.
+func tokenSource(s *secret.Source) gh.TokenSource {
+	return func(ctx context.Context, repo string) (string, error) { return s.Get(ctx) }
+}
+
+// appKey reads an app private key, which may come from a command.
+func appKey(app *config.GitHubApp) ([]byte, error) {
+	if !app.KeySpec().FromCommand() {
+		return app.ResolvePrivateKey()
+	}
+	key, err := secret.Resolve(context.Background(), app.KeySpec())
+	if err != nil {
+		return nil, err
+	}
+	return []byte(strings.ReplaceAll(key, "\\n", "\n")), nil
 }
 
 // buildTokenSource turns the configured credentials into a token source: a
 // GitHub App if one is configured, otherwise a personal token, otherwise
 // nothing (which is valid for public repositories).
-func buildTokenSource(cfg *config.Config) (gh.TokenSource, *ghapp.Authenticator, string, error) {
+func buildTokenSource(cfg *config.Config,
+	logf func(watch, format string, args ...interface{})) (gh.TokenSource, *ghapp.Authenticator, string, error) {
 	if app := cfg.GitHub.App; app != nil {
-		key, err := app.ResolvePrivateKey()
+		key, err := appKey(app)
 		if err != nil {
 			return nil, nil, "", fmt.Errorf("github.app: %w", err)
 		}
@@ -195,6 +250,18 @@ func buildTokenSource(cfg *config.Config) (gh.TokenSource, *ghapp.Authenticator,
 			where = fmt.Sprintf("installation %d", app.InstallationID)
 		}
 		return auth.TokenFor, auth, fmt.Sprintf("GitHub App %s (%s)", app.ID, where), nil
+	}
+	spec := cfg.GitHub.TokenSpec()
+	if spec.FromCommand() {
+		source := secret.New(spec, func(format string, args ...interface{}) {
+			logf("github", format, args...)
+		})
+		// Run it now: a credential command that does not work should stop
+		// startup, not the first deployment.
+		if _, err := source.Get(context.Background()); err != nil {
+			return nil, nil, "", fmt.Errorf("github.token_command: %w", err)
+		}
+		return tokenSource(source), nil, "token from " + spec.Describe(), nil
 	}
 	token, err := cfg.GitHub.ResolveToken()
 	if err != nil {
@@ -414,7 +481,7 @@ func (e *Engine) Reload(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("configuration not reloaded, keeping the running one: %w", err)
 	}
-	token, app, description, err := buildTokenSource(newCfg)
+	token, app, description, err := buildTokenSource(newCfg, e.logf)
 	if err != nil {
 		return fmt.Errorf("configuration not reloaded, keeping the running one: %w", err)
 	}
@@ -434,7 +501,7 @@ func (e *Engine) Reload(ctx context.Context) error {
 	e.anon = gh.New(newCfg.GitHub.API, nil)
 	newCreds := map[string]registry.Credential{}
 	for hostName, auth := range newCfg.Registry {
-		password, perr := auth.ResolvePassword()
+		password, perr := secret.Resolve(context.Background(), auth.Spec())
 		if perr != nil {
 			e.logf("config", "registry %s: %v", hostName, perr)
 			continue
@@ -443,6 +510,12 @@ func (e *Engine) Reload(ctx context.Context) error {
 	}
 	e.registry = registry.New(newCreds)
 	e.notifier = notifier
+	if err := e.buildWatchCredentials(newCfg); err != nil {
+		// The watches themselves are already validated, so this is a bad
+		// per-watch credential. Say so and let the watch fail visibly rather
+		// than falling back to a broader credential.
+		e.logf("config", "%v", err)
+	}
 
 	if err := e.start(ctx); err != nil {
 		return fmt.Errorf("reloaded configuration could not be started: %w", err)

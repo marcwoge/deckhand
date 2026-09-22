@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/marcwoge/deckhand/internal/audit"
+	"github.com/marcwoge/deckhand/internal/secret"
 	"github.com/marcwoge/deckhand/internal/telegram"
 )
 
@@ -38,7 +39,7 @@ func (e *Engine) runCommandBot(ctx context.Context) {
 	if ch == nil {
 		return
 	}
-	token, err := ch.ResolveToken()
+	token, err := secret.Resolve(ctx, ch.Spec())
 	if err != nil {
 		e.logf("telegram", "commands disabled: %v", err)
 		return

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/marcwoge/deckhand/internal/config"
+	"github.com/marcwoge/deckhand/internal/secret"
 	"github.com/marcwoge/deckhand/internal/telegram"
 )
 
@@ -50,7 +51,9 @@ func New(cfg config.Notify) (*Notifier, error) {
 	}
 	var problems []string
 	for i, c := range cfg.Channels {
-		token, err := c.ResolveToken()
+		// The token may come from a secret manager, so this can run a command.
+		// Notification credentials are read once, at startup.
+		token, err := secret.Resolve(context.Background(), c.Spec())
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("channel #%d (%s): %v", i+1, c.Type, err))
 			continue

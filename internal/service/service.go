@@ -10,6 +10,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 )
 
@@ -20,6 +21,11 @@ type Params struct {
 	User       string // service account (unix only); empty means the current user
 	StateDir   string
 	SystemWide bool // install for all users (needs root/administrator)
+	// CredentialFiles are the credential files the configuration reads, as
+	// name -> path. They are only used to write the systemd-creds hint, which
+	// is how a credential can be encrypted at rest without Deckhand holding a
+	// decryption key.
+	CredentialFiles map[string]string
 }
 
 // Install writes and enables the platform's service definition.
@@ -101,7 +107,10 @@ ProtectHome=read-only
 ProtectKernelTunables=yes
 ProtectControlGroups=yes
 RestrictSUIDSGID=yes
+# A crash dump of a process holding deployment tokens would write them to disk.
+LimitCORE=0
 {{STATE}}
+{{CREDENTIALS}}
 
 [Install]
 WantedBy={{TARGET}}
@@ -123,6 +132,7 @@ func installSystemd(p Params, out io.Writer) error {
 		}
 	}
 	unit = strings.ReplaceAll(unit, "{{STATE}}", stateLine)
+	unit = strings.ReplaceAll(unit, "{{CREDENTIALS}}", credentialSection(p.CredentialFiles))
 
 	var path string
 	var systemctl []string
@@ -164,6 +174,40 @@ func installSystemd(p Params, out io.Writer) error {
 	fmt.Fprintf(out, "service enabled and started\n  status: %s status deckhand\n  logs:   journalctl -u deckhand -f\n",
 		strings.Join(systemctl, " "))
 	return nil
+}
+
+// credentialSection writes commented systemd-creds lines for the credential
+// files a configuration uses.
+//
+// Encryption is only real when the key is not sitting next to the ciphertext.
+// systemd-creds encrypts to the TPM or a host key, so the file on disk is
+// useless if copied elsewhere and the plaintext only ever exists in a tmpfs the
+// service can read. That cannot be done for the operator - it needs their
+// passphrase-free access to the TPM at the moment of encryption - so the unit
+// carries the exact commands instead of a half-configured directive.
+func credentialSection(files map[string]string) string {
+	if len(files) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var b strings.Builder
+	b.WriteString("# Credentials are read from plain files, protected only by their\n")
+	b.WriteString("# permissions. To bind them to this machine's TPM instead, run:\n")
+	for _, name := range names {
+		b.WriteString(fmt.Sprintf("#   systemd-creds encrypt --name=%s %s /etc/deckhand/%s.cred\n",
+			name, files[name], name))
+	}
+	b.WriteString("# then delete the plaintext, uncomment the lines below, and point the\n")
+	b.WriteString("# configuration at ${CREDENTIALS_DIRECTORY}/<name>:\n")
+	for _, name := range names {
+		b.WriteString(fmt.Sprintf("# LoadCredentialEncrypted=%s:/etc/deckhand/%s.cred\n", name, name))
+	}
+	return b.String()
 }
 
 func uninstallSystemd(p Params, out io.Writer) error {

@@ -78,6 +78,7 @@ config, it is used automatically.
 | `api` | API base URL. Change for GitHub Enterprise Server, e.g. `https://ghe.example.com/api/v3`. |
 | `host` | Git host used for cloning. Defaults to `github.com`. |
 | `app` | Authenticate as a GitHub App instead of with a personal access token. See [security.md](security.md#authenticating-as-a-github-app). |
+| `token_command` | Read the token from a secret manager (`pass`, Vault, 1Password, sops, …). `token_ttl` sets how long the value is reused, default 1h. See [security.md](security.md#credentials-at-rest). |
 
 If none of the three token settings is given, `$DECKHAND_GITHUB_TOKEN` is used.
 
