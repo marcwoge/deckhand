@@ -58,11 +58,7 @@ func (e *Engine) deployTarget(ctx context.Context, w *config.Watch, t *gh.Target
 	st.LastAttempt = time.Now().UTC()
 
 	log := func(format string, args ...interface{}) { e.logf(w.Name, format, args...) }
-	token := e.token
-	if w.Auth == "none" {
-		token = nil
-	}
-	d := deploy.New(w, e.watchStateDir(w), token, e.binary, log)
+	d := deploy.New(w, e.watchStateDir(w), e.tokenFor(w), e.binary, log)
 
 	start := time.Now()
 	if t.Kind == "image" {
@@ -290,11 +286,7 @@ func (e *Engine) Rollback(ctx context.Context, w *config.Watch) error {
 		return fmt.Errorf("no previous revision recorded for %q", w.Name)
 	}
 	log := func(format string, args ...interface{}) { e.logf(w.Name, format, args...) }
-	token := e.token
-	if w.Auth == "none" {
-		token = nil
-	}
-	d := deploy.New(w, e.watchStateDir(w), token, e.binary, log)
+	d := deploy.New(w, e.watchStateDir(w), e.tokenFor(w), e.binary, log)
 	if err := e.rollbackTo(ctx, w, d, st, log, st.PreviousRelease, st.PreviousSHA); err != nil {
 		return err
 	}

@@ -133,7 +133,7 @@ func (e *Engine) checkGitHub(ctx context.Context, r *report) {
 	// installation; /rate_limit itself concerns none.
 	hint := ""
 	for _, w := range e.cfg.Watches {
-		if w.IsEnabled() && w.Auth != "none" {
+		if w.IsEnabled() && !w.Auth.Anonymous() {
 			hint = w.Repo
 			break
 		}
@@ -222,6 +222,12 @@ func (e *Engine) checkWatch(ctx context.Context, r *report, w *config.Watch) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+
+	// A misconfigured per-watch credential is otherwise invisible until a
+	// deployment fails, so name the one in use.
+	if w.Auth.Own() || w.Auth.Anonymous() {
+		r.ok("credential: %s", e.AuthDescriptionFor(w))
+	}
 
 	// For an app this also proves the installation covers the repository.
 	private, err := e.clientFor(w).Repository(ctx, w.Repo)

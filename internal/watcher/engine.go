@@ -41,6 +41,12 @@ type Engine struct {
 	host            string
 	logf            func(watch, format string, args ...interface{})
 
+	// Per-watch credentials, by watch name. A watch missing from these maps
+	// uses the global credential above.
+	watchTokens map[string]gh.TokenSource
+	watchClient map[string]*gh.Client
+	watchAuth   map[string]string
+
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
 
@@ -113,6 +119,24 @@ func New(cfg *config.Config, o Options) (*Engine, error) {
 		authDescription: description,
 		logf:            logf,
 		locks:           map[string]*sync.Mutex{},
+		watchTokens:     map[string]gh.TokenSource{},
+		watchClient:     map[string]*gh.Client{},
+		watchAuth:       map[string]string{},
+	}
+	// A watch may bring its own credential, so that one token does not have to
+	// reach every watched repository. Resolving them here means a bad token
+	// file is reported at startup, not at the first deployment.
+	for _, w := range cfg.Watches {
+		if !w.Auth.Own() {
+			continue
+		}
+		source, description, err := buildWatchTokenSource(cfg, w)
+		if err != nil {
+			return nil, fmt.Errorf("watch %q: %w", w.Name, err)
+		}
+		e.watchTokens[w.Name] = source
+		e.watchClient[w.Name] = gh.New(cfg.GitHub.API, source)
+		e.watchAuth[w.Name] = description
 	}
 	if notifyErr != nil {
 		// A broken notification channel is worth complaining about loudly, but
@@ -120,6 +144,37 @@ func New(cfg *config.Config, o Options) (*Engine, error) {
 		logf("notify", "warning: %v", notifyErr)
 	}
 	return e, nil
+}
+
+// buildWatchTokenSource builds the credential for a single watch. It mirrors
+// buildTokenSource but never falls back to the global credential: a watch that
+// names its own credential must use that one or fail.
+func buildWatchTokenSource(cfg *config.Config, w *config.Watch) (gh.TokenSource, string, error) {
+	if app := w.Auth.App; app != nil {
+		key, err := app.ResolvePrivateKey()
+		if err != nil {
+			return nil, "", fmt.Errorf("auth.app: %w", err)
+		}
+		auth, err := ghapp.New(cfg.GitHub.API, app.ID, key, app.InstallationID)
+		if err != nil {
+			return nil, "", fmt.Errorf("auth.app: %w", err)
+		}
+		where := "installation discovered per repository"
+		if app.InstallationID != 0 {
+			where = fmt.Sprintf("installation %d", app.InstallationID)
+		}
+		return auth.TokenFor, fmt.Sprintf("GitHub App %s (%s)", app.ID, where), nil
+	}
+	token, err := w.Auth.ResolveToken()
+	if err != nil {
+		return nil, "", err
+	}
+	if token == "" {
+		// An empty per-watch credential is a configuration mistake, not a
+		// reason to silently fall back to a broader one.
+		return nil, "", fmt.Errorf("auth names a credential (%s) that is empty", w.Auth.Describe())
+	}
+	return gh.StaticToken(token), "own " + w.Auth.Describe(), nil
 }
 
 // buildTokenSource turns the configured credentials into a token source: a
@@ -196,10 +251,37 @@ func (e *Engine) lockFor(name string) *sync.Mutex {
 }
 
 func (e *Engine) clientFor(w *config.Watch) *gh.Client {
-	if w.Auth == "none" {
+	if w.Auth.Anonymous() {
 		return e.anon
 	}
+	if c, ok := e.watchClient[w.Name]; ok {
+		return c
+	}
 	return e.client
+}
+
+// tokenFor returns the credential a watch deploys with: its own if it has one,
+// nothing at all when it is anonymous, otherwise the global one.
+func (e *Engine) tokenFor(w *config.Watch) gh.TokenSource {
+	if w.Auth.Anonymous() {
+		return nil
+	}
+	if t, ok := e.watchTokens[w.Name]; ok {
+		return t
+	}
+	return e.token
+}
+
+// AuthDescriptionFor names the credential a watch uses, for "check" and
+// "doctor". It never returns a value, only where it comes from.
+func (e *Engine) AuthDescriptionFor(w *config.Watch) string {
+	if w.Auth.Anonymous() {
+		return "none (anonymous)"
+	}
+	if d, ok := e.watchAuth[w.Name]; ok {
+		return d
+	}
+	return e.authDescription + " (global)"
 }
 
 // Watch returns a configured watch by name.
@@ -376,7 +458,7 @@ func (e *Engine) runWatch(ctx context.Context, w *config.Watch) {
 	// which one watch at a minute would exhaust. Other endpoints - GitHub
 	// Enterprise, a mirror, a test server - have their own limits, so the
 	// configured interval is honoured there.
-	if w.NeedsCheckout() && w.Auth == "none" && !e.Authenticated() && interval < 5*time.Minute &&
+	if w.NeedsCheckout() && w.Auth.Anonymous() && !e.Authenticated() && interval < 5*time.Minute &&
 		isPublicGitHub(e.cfg.GitHub.API) {
 		interval = 5 * time.Minute
 		e.logf(w.Name, "no token available; polling every %s to stay inside github.com's anonymous rate limit", interval)

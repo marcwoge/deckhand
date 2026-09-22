@@ -39,8 +39,8 @@ func TestLoadMinimal(t *testing.T) {
 	if w.Strategy != StrategyReleases {
 		t.Errorf("strategy = %q, want %q", w.Strategy, StrategyReleases)
 	}
-	if w.Auth != "token" {
-		t.Errorf("auth = %q, want token", w.Auth)
+	if w.Auth.Mode != "token" || w.Auth.Own() {
+		t.Errorf("auth = %+v, want the global token", w.Auth)
 	}
 	if w.CloneURL != "https://github.com/acme/app.git" {
 		t.Errorf("clone url = %q", w.CloneURL)
@@ -455,5 +455,131 @@ watch:
 	noImage := strings.Replace(fmt.Sprintf(base, ""), "      image: ghcr.io/marcwoge/shop\n", "", 1)
 	if _, err := Load(write(t, noImage)); err == nil {
 		t.Error("an image trigger without an image should have been rejected")
+	}
+}
+
+// auth: accepted both short forms long before the block form existed, so both
+// must keep parsing exactly as they did.
+func TestWatchAuthShortForms(t *testing.T) {
+	cfg, err := Load(write(t, `
+version: 1
+watch:
+  - name: a
+    repo: acme/a
+    auth: none
+    trigger: { type: release }
+    path: /tmp/deckhand-test-a
+    run: [["true"]]
+  - name: b
+    repo: acme/b
+    auth: token
+    trigger: { type: release }
+    path: /tmp/deckhand-test-b
+    run: [["true"]]
+`))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.Watches[0].Auth.Anonymous() {
+		t.Error(`auth: none must mean anonymous`)
+	}
+	if cfg.Watches[1].Auth.Anonymous() || cfg.Watches[1].Auth.Own() {
+		t.Error(`auth: token must mean the global credential`)
+	}
+}
+
+func TestWatchAuthBlockForm(t *testing.T) {
+	dir := t.TempDir()
+	tokenFile := filepath.Join(dir, "token")
+	if err := os.WriteFile(tokenFile, []byte("per-repo-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(write(t, fmt.Sprintf(`
+version: 1
+watch:
+  - name: a
+    repo: acme/a
+    auth:
+      token_file: %s
+    trigger: { type: release }
+    path: /tmp/deckhand-test-a
+    run: [["true"]]
+`, tokenFile)))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	auth := cfg.Watches[0].Auth
+	if !auth.Own() {
+		t.Fatal("the watch must be seen as bringing its own credential")
+	}
+	got, err := auth.ResolveToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "per-repo-token" {
+		t.Errorf("token = %q, want the file contents", got)
+	}
+	if !strings.Contains(auth.Describe(), tokenFile) {
+		t.Errorf("describe = %q, want the source named", auth.Describe())
+	}
+	if strings.Contains(auth.Describe(), "per-repo-token") {
+		t.Error("describe must never contain the credential itself")
+	}
+}
+
+// A token file others can read is refused for a per-watch credential exactly as
+// it is for the global one - and at load time, not at the first deployment.
+func TestWatchAuthRefusesLooseTokenFile(t *testing.T) {
+	dir := t.TempDir()
+	tokenFile := filepath.Join(dir, "token")
+	if err := os.WriteFile(tokenFile, []byte("secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(tokenFile, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(write(t, fmt.Sprintf(`
+version: 1
+watch:
+  - name: a
+    repo: acme/a
+    auth:
+      token_file: %s
+    trigger: { type: release }
+    path: /tmp/deckhand-test-a
+    run: [["true"]]
+`, tokenFile)))
+	if err == nil || !strings.Contains(err.Error(), "readable by others") {
+		t.Fatalf("error = %v, want a refusal naming the permissions", err)
+	}
+}
+
+func TestWatchAuthRejectsContradictions(t *testing.T) {
+	cases := map[string]string{
+		"two sources": `
+    auth:
+      token: a
+      token_env: B`,
+		"none plus a credential": `
+    auth:
+      mode: none
+      token: a`,
+		"nonsense mode": `
+    auth: sometimes`,
+	}
+	for name, block := range cases {
+		body := `
+version: 1
+watch:
+  - name: a
+    repo: acme/a` + block + `
+    trigger: { type: release }
+    path: /tmp/deckhand-test-a
+    run: [["true"]]
+`
+		if _, err := Load(write(t, body)); err == nil {
+			t.Errorf("%s: must be refused", name)
+		}
 	}
 }

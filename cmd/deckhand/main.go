@@ -199,7 +199,7 @@ func cmdCheck(args []string) error {
 		if w.Trigger.Type == config.TriggerImage {
 			fmt.Printf("    image:      %s\n", w.Trigger.Image)
 		} else {
-			fmt.Printf("    repository: %s (auth: %s)\n", w.Repo, w.Auth)
+			fmt.Printf("    repository: %s (auth: %s)\n", w.Repo, eng.AuthDescriptionFor(w))
 		}
 		fmt.Printf("    trigger:    %s\n", triggerLine(w))
 		fmt.Printf("    path:       %s (strategy %s)\n", w.Path, w.Strategy)
@@ -277,7 +277,7 @@ func warnings(w *config.Watch) []string {
 			}
 		}
 	}
-	if w.Trigger.Type == config.TriggerBranch && w.Verify.RequireSignedCommit == false && w.Auth == "none" {
+	if w.Trigger.Type == config.TriggerBranch && w.Verify.RequireSignedCommit == false && w.Auth.Anonymous() {
 		out = append(out, "watching a branch of a repository you do not control; consider verify.require_signed_commit")
 	}
 	if w.Health == nil {

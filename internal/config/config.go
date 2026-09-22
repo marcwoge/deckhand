@@ -158,11 +158,13 @@ type Heartbeat struct {
 
 // Watch is a single repository being observed.
 type Watch struct {
-	Name    string  `yaml:"name"`
-	Repo    string  `yaml:"repo"` // owner/name
-	Auth    string  `yaml:"auth"` // token (default) | none
-	Trigger Trigger `yaml:"trigger"`
-	Path    string  `yaml:"path"`
+	Name string `yaml:"name"`
+	Repo string `yaml:"repo"` // owner/name
+	// Auth is "token" (the default, using the global credential), "none", or a
+	// block naming a credential for this repository alone.
+	Auth    WatchAuth `yaml:"auth"`
+	Trigger Trigger   `yaml:"trigger"`
+	Path    string    `yaml:"path"`
 
 	Strategy       string            `yaml:"strategy"`
 	Shared         []string          `yaml:"shared"`
@@ -200,6 +202,128 @@ type Trigger struct {
 	// which is what a rebuilt "latest" is.
 	Image string `yaml:"image"`
 	Tag   string `yaml:"tag"`
+}
+
+// WatchAuth is the credential one watch uses. It exists because one token for
+// every repository is both wrong (repositories live in different accounts) and
+// risky (a single token that reads everything is worth more to an attacker
+// than one token per repository).
+//
+// It accepts the two short forms it always did - "auth: token" and
+// "auth: none" - or a block naming a credential for this watch alone.
+type WatchAuth struct {
+	// Mode is "token" (use a credential) or "none" (anonymous). In the block
+	// form it can be written out, so that "mode: none" next to a token is
+	// caught as the contradiction it is rather than silently ignored.
+	Mode string `yaml:"mode"`
+
+	// A credential for this watch only. Empty means the global one.
+	Token     string `yaml:"token"`
+	TokenEnv  string `yaml:"token_env"`
+	TokenFile string `yaml:"token_file"`
+
+	// App is a GitHub App installation for this watch only, for a machine
+	// watching repositories covered by different apps.
+	App *GitHubApp `yaml:"app"`
+}
+
+// UnmarshalYAML accepts both the string form and the block form.
+func (a *WatchAuth) UnmarshalYAML(value *yaml.Node) error {
+	switch value.Kind {
+	case yaml.ScalarNode:
+		var mode string
+		if err := value.Decode(&mode); err != nil {
+			return err
+		}
+		a.Mode = mode
+		return nil
+	case yaml.MappingNode:
+		type raw WatchAuth
+		var r raw
+		if err := value.Decode(&r); err != nil {
+			return err
+		}
+		*a = WatchAuth(r)
+		if a.Mode == "" {
+			a.Mode = "token"
+		}
+		return nil
+	}
+	return fmt.Errorf("auth must be \"token\", \"none\", or a block naming a credential")
+}
+
+// Anonymous reports whether this watch is fetched without a credential.
+func (a WatchAuth) Anonymous() bool { return a.Mode == "none" }
+
+// Own reports whether this watch brings its own credential rather than using
+// the global one.
+func (a WatchAuth) Own() bool {
+	return a.Token != "" || a.TokenEnv != "" || a.TokenFile != "" || a.App != nil
+}
+
+// Describe names the credential source, for "check" and "doctor". It never
+// prints a value.
+func (a WatchAuth) Describe() string {
+	switch {
+	case a.Anonymous():
+		return "none"
+	case a.App != nil:
+		return "app " + a.App.ID
+	case a.TokenFile != "":
+		return "token_file " + a.TokenFile
+	case a.TokenEnv != "":
+		return "token_env " + a.TokenEnv
+	case a.Token != "":
+		return "inline token"
+	}
+	return "token (global)"
+}
+
+// ResolveToken reads this watch's own credential. It is only called when Own
+// reports true.
+func (a WatchAuth) ResolveToken() (string, error) {
+	return resolveSecret(a.Token, a.TokenEnv, a.TokenFile)
+}
+
+// validate checks one watch credential.
+func (a *WatchAuth) validate() error {
+	if a.Mode == "" {
+		a.Mode = "token"
+	}
+	if a.Mode != "token" && a.Mode != "none" {
+		return fmt.Errorf("auth must be \"token\" or \"none\", got %q", a.Mode)
+	}
+	if a.Mode == "none" && a.Own() {
+		return fmt.Errorf("auth is \"none\" and also names a credential; pick one")
+	}
+	sources := 0
+	for _, set := range []bool{a.Token != "", a.TokenEnv != "", a.TokenFile != "", a.App != nil} {
+		if set {
+			sources++
+		}
+	}
+	if sources > 1 {
+		return fmt.Errorf("auth has several credential sources; pick one")
+	}
+	if a.App != nil {
+		if a.App.ID == "" {
+			return fmt.Errorf("auth.app needs an id")
+		}
+		if _, err := a.App.ResolvePrivateKey(); err != nil {
+			return fmt.Errorf("auth.app: %w", err)
+		}
+		if a.App.InstallationID < 0 {
+			return fmt.Errorf("auth.app installation_id cannot be negative")
+		}
+	}
+	if a.TokenFile != "" || a.TokenEnv != "" || a.Token != "" {
+		// Fail at startup rather than at the first deployment: a token file
+		// others can read is refused here, exactly as the global one is.
+		if _, err := a.ResolveToken(); err != nil {
+			return fmt.Errorf("auth: %w", err)
+		}
+	}
+	return nil
 }
 
 // RegistryAuth is the pull credential for one registry host.
@@ -543,11 +667,8 @@ func (w *Watch) normalise(c *Config) error {
 	if w.CloneURL == "" && w.Repo != "" {
 		w.CloneURL = fmt.Sprintf("https://%s/%s.git", c.GitHub.Host, w.Repo)
 	}
-	if w.Auth == "" {
-		w.Auth = "token"
-	}
-	if w.Auth != "token" && w.Auth != "none" {
-		return fmt.Errorf("auth must be \"token\" or \"none\"")
+	if err := w.Auth.validate(); err != nil {
+		return err
 	}
 	if w.Path == "" {
 		return fmt.Errorf("path is required")

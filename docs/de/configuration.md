@@ -213,9 +213,72 @@ Jeder Eintrag beschreibt ein Repository.
 |---|---|---|
 | `name` | ja | Eindeutiger Name, erscheint in Befehlen, Logs und Statusausgabe. |
 | `repo` | ja | `eigentümer/name`. |
-| `auth` | nein | `token` (Standard) oder `none` für öffentliche Repositories, die anonym abgefragt werden sollen. |
+| `auth` | nein | `token` (Standard), `none` für öffentliche Repositories, die anonym abgefragt werden, oder ein Block mit einem Credential nur für dieses Repository — siehe [unten](#ein-credential-pro-watch). |
 | `enabled` | nein | Auf `false` setzen, um einen Eintrag zu behalten, ohne ihn auszuführen. |
 | `clone_url` | nein | Überschreibt, woher der Code geholt wird. Selten nötig. |
+
+#### Ein Credential pro Watch
+
+`github.token_*` ist das Credential, auf das jeder Watch zurückfällt. Für zwei
+häufige Fälle ist das die falsche Form: Repositories in **verschiedenen
+Accounts**, die kein einzelner Token erreicht, und der **Schadensradius** — ein
+Token, der jedes beobachtete Repository lesen kann, ist für einen Angreifer
+mehr wert als ein Token pro Repository. Ein fein granulierter PAT für genau ein
+Repository ist das kleinste brauchbare Credential, und `auth:` erlaubt es:
+
+```yaml
+github:
+  token_env: DECKHAND_GITHUB_TOKEN      # bleibt der Rückfall
+
+watch:
+  - name: shop
+    repo: acme/shop
+    auth:
+      token_file: /etc/deckhand/tokens/shop     # nur dieses Repository
+
+  - name: api
+    repo: other-org/api
+    auth:
+      token_env: DECKHAND_TOKEN_API
+
+  - name: upstream
+    repo: someone/public
+    auth: none                                   # gar kein Credential
+
+  - name: legacy
+    repo: acme/legacy                            # kein auth: der globale Token
+```
+
+Ein Watch kann auch seine eigene GitHub App nutzen — für eine Maschine, deren
+Repositories von verschiedenen Apps abgedeckt werden:
+
+```yaml
+    auth:
+      app:
+        id: "123456"
+        private_key_file: /etc/deckhand/other-app.pem
+```
+
+Wichtige Regeln:
+
+* Eine Quelle pro Block. `token`, `token_env`, `token_file` und `app` schließen
+  sich aus, und ein Block mit Credential *und* `mode: none` wird abgelehnt
+  statt geraten.
+* **Ein leeres Watch-Credential ist ein Fehler, kein Rückfall.** Zeigt
+  `token_env` auf eine nicht gesetzte Variable, startet Deckhand nicht, statt
+  still den globalen Token zu nehmen: ein Credential unbemerkt zu verbreitern,
+  das man gerade eingeschränkt hat, ist das einzige Ergebnis, das schlimmer ist
+  als ein klarer Fehler.
+* Eine Token-Datei, die andere lesen können, wird beim Start abgelehnt — genau
+  wie die globale.
+* `deckhand check` und `deckhand doctor` zeigen, welches Credential jeder Watch
+  benutzt, damit ein falsch konfiguriertes auffällt, bevor ein Deployment
+  scheitert. Sie zeigen die Quelle, nie den Wert.
+
+`registry:`-Credentials bleiben **pro Host**, nicht pro Watch: ein Credential
+für `ghcr.io` muss alle auf `ghcr.io` beobachteten Images abdecken. Wer zwei
+verschiedene Accounts auf demselben Host braucht, möge das in
+[Issue #14](https://github.com/marcwoge/deckhand/issues/14) sagen.
 
 ### Was beobachtet wird
 

@@ -209,9 +209,71 @@ Each entry describes one repository.
 |---|---|---|
 | `name` | yes | Unique name, used in commands, logs and status output. |
 | `repo` | yes | `owner/name`. |
-| `auth` | no | `token` (default) or `none` for public repositories you want to poll anonymously. |
+| `auth` | no | `token` (default), `none` for public repositories polled anonymously, or a block naming a credential for this repository alone — see [below](#a-credential-per-watch). |
 | `enabled` | no | Set to `false` to keep an entry in the file without running it. |
 | `clone_url` | no | Overrides where the code is fetched from. Rarely needed. |
+
+#### A credential per watch
+
+`github.token_*` is the credential every watch falls back to. That is the wrong
+shape for two common cases: repositories in **different accounts**, which no
+single token can reach, and **blast radius** — one token that reads every
+watched repository is worth more to an attacker than one token per repository.
+A fine-grained PAT restricted to a single repository is the smallest useful
+credential, and `auth:` lets you use it:
+
+```yaml
+github:
+  token_env: DECKHAND_GITHUB_TOKEN      # still the fallback
+
+watch:
+  - name: shop
+    repo: acme/shop
+    auth:
+      token_file: /etc/deckhand/tokens/shop     # this repository only
+
+  - name: api
+    repo: other-org/api
+    auth:
+      token_env: DECKHAND_TOKEN_API
+
+  - name: upstream
+    repo: someone/public
+    auth: none                                   # no credential at all
+
+  - name: legacy
+    repo: acme/legacy                            # no auth: the global one
+```
+
+A watch can also use its own GitHub App, for a machine watching repositories
+covered by different apps:
+
+```yaml
+    auth:
+      app:
+        id: "123456"
+        private_key_file: /etc/deckhand/other-app.pem
+```
+
+Rules worth knowing:
+
+* One source per block. `token`, `token_env`, `token_file` and `app` are
+  mutually exclusive, and a block that names a credential *and* `mode: none` is
+  refused rather than guessed at.
+* **An empty per-watch credential is an error, not a fallback.** If
+  `token_env` names an unset variable, Deckhand refuses to start instead of
+  quietly using the global token — silently widening a credential you were
+  narrowing is the one outcome worse than a clear failure.
+* A token file others can read is refused at startup, exactly as the global one
+  is.
+* `deckhand check` and `deckhand doctor` print which credential each watch
+  uses, so a misconfigured one shows up before a deployment fails. They print
+  the source, never the value.
+
+`registry:` credentials remain **per host**, not per watch: a credential for
+`ghcr.io` must cover every image watched on `ghcr.io`. If you need two different
+accounts on the same host, say so in
+[issue #14](https://github.com/marcwoge/deckhand/issues/14).
 
 ### What to watch
 
