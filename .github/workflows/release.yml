@@ -15,6 +15,8 @@ jobs:
   build:
     name: Build release binaries
     runs-on: ubuntu-latest
+    outputs:
+      signing: ${{ steps.key.outputs.signing }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -25,6 +27,39 @@ jobs:
 
       - name: Test before releasing
         run: go test ./...
+
+      # Signing the packages and the repository needs a long-lived GPG key,
+      # unlike the keyless cosign signature over the checksums. Everything below
+      # degrades cleanly when the secret is absent: the packages are built
+      # unsigned and the package repository is simply not published.
+      - name: Prepare the package signing key
+        id: key
+        env:
+          REPO_GPG_PRIVATE_KEY: ${{ secrets.REPO_GPG_PRIVATE_KEY }}
+        run: |
+          if [ -z "${REPO_GPG_PRIVATE_KEY}" ]; then
+            echo "no REPO_GPG_PRIVATE_KEY secret; packages stay unsigned and no"
+            echo "apt/dnf repository is published (see packaging/README.md)"
+            echo "signing=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          key="${RUNNER_TEMP}/signing-key.asc"
+          umask 077
+          printf '%s' "${REPO_GPG_PRIVATE_KEY}" > "$key"
+          export GNUPGHOME="${RUNNER_TEMP}/gnupg"
+          mkdir -p "$GNUPGHOME"
+          chmod 700 "$GNUPGHOME"
+          gpg --batch --quiet --import "$key"
+          id="$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr:/{print $10; exit}')"
+          # A key that cannot sign unattended would fail much later, in the
+          # middle of publishing.
+          echo probe | gpg --batch --yes --local-user "$id" --detach-sign -o /dev/null - ||
+            { echo "::error::the signing key cannot sign unattended - export it without a passphrase"; exit 1; }
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+          echo "SIGNING_KEY_FILE=$key" >> "$GITHUB_ENV"
+          echo "REPO_KEY_ID=$id" >> "$GITHUB_ENV"
+          echo "signing=true" >> "$GITHUB_OUTPUT"
+          echo "signing with $id"
 
       - name: Build
         run: |
@@ -89,6 +124,7 @@ jobs:
 
       - name: Publish
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
+        id: publish
         with:
           files: dist/*
           generate_release_notes: true
@@ -169,3 +205,55 @@ jobs:
 
             See the [README](https://github.com/marcwoge/deckhand#readme) ·
             [Deutsch](https://github.com/marcwoge/deckhand/blob/main/README.de.md)
+
+      # --- the apt and dnf repository -------------------------------------
+      # The repository is rebuilt from scratch and served by GitHub Pages. The
+      # older packages come from the previous releases' own assets, so the
+      # releases are the archive and this is only an index over them - nothing
+      # accumulates in git history.
+      - name: Collect the packages of recent releases
+        if: steps.key.outputs.signing == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./packaging/fetch-release-packages.sh --pool repo-pool --keep 5
+
+      - name: Build the apt and dnf repository
+        if: steps.key.outputs.signing == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends apt-utils createrepo-c
+          ./packaging/build-repo.sh \
+            --pool repo-pool \
+            --site site \
+            --base-url "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}" \
+            --key-id "$REPO_KEY_ID"
+
+      - name: Upload the repository as a Pages artifact
+        if: steps.key.outputs.signing == 'true'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
+        with:
+          path: site
+
+  # A second job, because deploying to Pages needs permissions this one should
+  # not have while it is building and signing artifacts.
+  pages:
+    name: Publish the package repository
+    needs: build
+    if: needs.build.outputs.signing == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      # enablement turns Pages on with the Actions source the first time, so
+      # nobody has to find the setting.
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
+        with:
+          enablement: true
+
+      - id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5

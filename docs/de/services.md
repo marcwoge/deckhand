@@ -121,6 +121,47 @@ du echte Symlinks. Passt beides nicht, nimm `strategy: inplace`.
 
 ## Aus einem Paket
 
+### Aus dem Paket-Repository
+
+Das ist die Variante, die sich wie jedes andere Paket auf der Maschine verhält —
+Updates inklusive:
+
+```bash
+# Debian, Ubuntu
+sudo curl -fsSLo /usr/share/keyrings/deckhand-archive-keyring.gpg \
+  https://marcwoge.github.io/deckhand/deckhand-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/deckhand-archive-keyring.gpg] https://marcwoge.github.io/deckhand/deb ./" |
+  sudo tee /etc/apt/sources.list.d/deckhand.list
+sudo apt update && sudo apt install deckhand
+```
+
+```bash
+# Fedora, RHEL, openSUSE
+sudo curl -fsSLo /etc/yum.repos.d/deckhand.repo https://marcwoge.github.io/deckhand/deckhand.repo
+sudo dnf install deckhand
+```
+
+Sowohl die Repository-Metadaten als auch die Pakete sind mit einem GPG-Schlüssel
+signiert; sein Fingerprint steht auf
+[der Startseite des Repositories](https://marcwoge.github.io/deckhand/). apt
+lehnt ein unsigniertes Repository ab — zu Recht, denn das Repository bestimmt,
+welche Dateien die Maschine als root installiert. Dieser Schlüssel ist
+langlebig, anders als die keyless cosign-Signatur über die Checksummen jedes
+Releases; [security.md](security.md#zwei-signaturen-zwei-verschiedene-aufgaben)
+erklärt, was welche schützt.
+
+Das Repository hält die fünf neuesten Releases, eine ältere Version lässt sich
+also weiterhin festnageln:
+
+```bash
+sudo apt install deckhand=0.1.2
+```
+
+### Aus einer heruntergeladenen Datei
+
+Wer kein fremdes Repository hinzufügen will: jedes Release enthält die Pakete
+auch als einfache Assets:
+
 ```bash
 # Debian, Ubuntu
 sudo apt install ./deckhand_0.1.1_amd64.deb

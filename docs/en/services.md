@@ -119,6 +119,45 @@ suits your setup, use `strategy: inplace`.
 
 ## From a package
 
+### From the package repository
+
+This is the one that behaves like every other package on the machine — upgrades
+included:
+
+```bash
+# Debian, Ubuntu
+sudo curl -fsSLo /usr/share/keyrings/deckhand-archive-keyring.gpg \
+  https://marcwoge.github.io/deckhand/deckhand-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/deckhand-archive-keyring.gpg] https://marcwoge.github.io/deckhand/deb ./" |
+  sudo tee /etc/apt/sources.list.d/deckhand.list
+sudo apt update && sudo apt install deckhand
+```
+
+```bash
+# Fedora, RHEL, openSUSE
+sudo curl -fsSLo /etc/yum.repos.d/deckhand.repo https://marcwoge.github.io/deckhand/deckhand.repo
+sudo dnf install deckhand
+```
+
+Both the repository metadata and the packages are signed with a GPG key whose
+fingerprint is on [the repository's front page](https://marcwoge.github.io/deckhand/).
+apt refuses an unsigned repository, and it is right to — the repository is what
+tells your machine which files to install as root. That key is long-lived, unlike
+the keyless cosign signature over each release's checksums; [security.md](security.md#two-signatures-two-different-jobs)
+explains what each one protects.
+
+The repository carries the five most recent releases, so pinning an older one
+still works:
+
+```bash
+sudo apt install deckhand=0.1.2
+```
+
+### From a downloaded file
+
+If you would rather not add a third-party repository, every release carries the
+packages as plain assets:
+
 ```bash
 # Debian, Ubuntu
 sudo apt install ./deckhand_0.1.1_amd64.deb

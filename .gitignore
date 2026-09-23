@@ -15,3 +15,7 @@ deckhand.yml
 
 # Package build staging
 /build/
+
+# Repository build output
+/site/
+/repo-pool/

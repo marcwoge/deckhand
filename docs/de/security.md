@@ -325,6 +325,40 @@ Davon musst du nichts konfigurieren:
 * Ein Credential aus einem Kommando wird nie geloggt, und die Argumente des
   Kommandos auch nicht.
 
+## Zwei Signaturen, zwei verschiedene Aufgaben
+
+Deckhand ist zweimal signiert, bewusst mit verschiedenen Verfahren — und es
+lohnt zu wissen, was wovon abgedeckt wird.
+
+**Releases: cosign, keyless.** Die `SHA256SUMS` jedes Releases wird mit
+[cosign](https://docs.sigstore.dev) im keyless-Modus signiert. Es gibt nirgends
+einen privaten Schlüssel — die Signatur ist über eine OIDC-Identität an den
+Release-Workflow dieses Repositories gebunden und im öffentlichen
+Transparenz-Log vermerkt. Sie beweist, dass ein Release aus diesem Workflow
+stammt, und was nicht existiert, kann nicht abfließen oder rotiert werden müssen.
+`scripts/install-release.sh` prüft sie, ebenso Homebrew-Tap und Scoop-Bucket,
+bevor sie eine Checksumme übernehmen.
+
+**Das Paket-Repository: GPG, langlebig.** apt prüft ein Repository über die
+Signatur seiner `Release`-Datei und lehnt ein unsigniertes ab. dnf tut dasselbe
+mit `repomd.xml` und prüft zusätzlich die Pakete. Das braucht einen Schlüssel,
+der zwischen Releases fortbesteht — also gibt es einen, und es ist der einzige
+langlebige Schlüssel in diesem Projekt:
+
+* nur zum Signieren, ohne Verschlüsselungsfähigkeit, ohne Ablaufdatum — ein
+  ablaufender Repository-Schlüssel zerlegt `apt update` auf jeder Maschine, die
+  ihn eingetragen hat, zu einem Zeitpunkt, den niemand gewählt hat;
+* ohne Passphrase, weil eine Passphrase im selben Secret-Store wie der Schlüssel
+  nichts schützt;
+* sein Fingerprint steht auf der
+  [Startseite des Repositories](https://marcwoge.github.io/deckhand/).
+
+Fließt dieser Schlüssel ab, kann sein Besitzer allen, die das Repository
+eingetragen haben, Pakete unterschieben. Das ist der Preis für `apt install` —
+und der Grund, warum die einfachen Binaries und die `.deb`/`.rpm`-Dateien
+weiterhin bei jedem Release liegen, für alle, die lieber eine einzelne Datei
+prüfen und von Hand installieren.
+
 ## Ein Problem melden
 
 Nutze bitte [Private Vulnerability Reporting](https://github.com/marcwoge/deckhand/security/advisories/new)

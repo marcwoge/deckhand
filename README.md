@@ -54,12 +54,19 @@ That is the whole setup. New release appears on GitHub → the code lands on the
 **1. Install**
 
 ```bash
-# Debian, Ubuntu - creates a deckhand service user, /etc/deckhand and a
-# hardened systemd unit, and leaves the service disabled until you configure it
-sudo apt install ./deckhand_0.1.1_amd64.deb
+# Debian, Ubuntu - from the signed package repository, so apt upgrades it
+# along with everything else. Creates a deckhand service user, /etc/deckhand
+# and a hardened systemd unit, and leaves the service disabled until you
+# have configured it.
+sudo curl -fsSLo /usr/share/keyrings/deckhand-archive-keyring.gpg \
+  https://marcwoge.github.io/deckhand/deckhand-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/deckhand-archive-keyring.gpg] https://marcwoge.github.io/deckhand/deb ./" |
+  sudo tee /etc/apt/sources.list.d/deckhand.list
+sudo apt update && sudo apt install deckhand
 
 # Fedora, RHEL, openSUSE
-sudo rpm -i deckhand-0.1.1-1.x86_64.rpm
+sudo curl -fsSLo /etc/yum.repos.d/deckhand.repo https://marcwoge.github.io/deckhand/deckhand.repo
+sudo dnf install deckhand
 
 # macOS
 brew tap marcwoge/deckhand && brew install marcwoge/deckhand/deckhand

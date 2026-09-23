@@ -309,6 +309,37 @@ You do not have to configure any of this:
 * A credential that comes from a command is never logged, and neither are the
   command's arguments.
 
+## Two signatures, two different jobs
+
+Deckhand is signed twice, with deliberately different mechanisms, and it is worth
+knowing which one covers what.
+
+**Releases: cosign, keyless.** The `SHA256SUMS` of every release is signed with
+[cosign](https://docs.sigstore.dev) in keyless mode. There is no private key
+anywhere — the signature is bound to this repository's release workflow through
+an OIDC identity and recorded in the public transparency log. It proves that a
+release came from that workflow, and nothing to leak means nothing to rotate.
+`scripts/install-release.sh` verifies it, and so do the Homebrew tap and the
+Scoop bucket before they copy a checksum.
+
+**The package repository: GPG, long-lived.** apt verifies a repository by the
+signature over its `Release` file and refuses an unsigned one. dnf does the same
+with `repomd.xml`, and checks the packages themselves. That needs a key that
+exists between releases, so there is one, and it is the one long-lived key in
+this project:
+
+* sign-only, no encryption capability, no expiry — an expiring repository key
+  breaks `apt update` on every machine that added it, at a moment nobody chose;
+* no passphrase, because a passphrase kept in the same secret store as the key
+  protects nothing;
+* its fingerprint is published on the
+  [repository front page](https://marcwoge.github.io/deckhand/).
+
+If that key leaks, whoever holds it can serve packages to everyone who added the
+repository. That is the cost of `apt install`, and it is why the plain binaries
+and the `.deb`/`.rpm` files stay downloadable from each release for anyone who
+would rather verify a single file and install it by hand.
+
 ## Reporting a problem
 
 Use [private vulnerability reporting](https://github.com/marcwoge/deckhand/security/advisories/new).

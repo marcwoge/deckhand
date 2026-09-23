@@ -13,6 +13,8 @@ what you get locally.
 | `scripts/postremove.sh` | reloads systemd; keeps configuration, state and the account |
 | `build-packages.sh` | builds every `.deb` and `.rpm` from binaries in `dist/` |
 | `generate-manifests.sh` | writes the Homebrew formula and the Scoop manifest with real checksums |
+| `build-repo.sh` | builds the signed apt and dnf repository for GitHub Pages |
+| `fetch-release-packages.sh` | collects recent releases' packages, so the repository can be rebuilt from scratch |
 | `tap/` | the contents of the `homebrew-deckhand` repository |
 | `bucket/` | the contents of the `scoop-deckhand` repository |
 
@@ -96,6 +98,106 @@ pin back to an older one.
 The logic itself is not duplicated: both workflows check out this repository and
 run `generate-manifests.sh --from-release`, so there is one generator and the
 local `--tag` mode is the same code path.
+
+## The apt and dnf repository
+
+`build-repo.sh` turns the packages into a signed apt and dnf repository that
+GitHub Pages serves. That is the difference between "download a .deb" and
+
+```bash
+sudo apt install deckhand
+```
+
+with upgrades arriving through the machine's own package manager from then on.
+
+### How it is published
+
+The release workflow, after publishing the release itself:
+
+1. `fetch-release-packages.sh --keep 5` downloads the `.deb` and `.rpm` assets of
+   the five most recent stable releases. **The releases are the archive**; the
+   repository is only an index over them. Nothing accumulates in git history, and
+   `apt install deckhand=0.1.1` keeps working for as long as that release is
+   within the window.
+2. `build-repo.sh` writes the index, signs it, and adds the key, the `.repo` file
+   and a landing page.
+3. The result is deployed to Pages as an artifact — no `gh-pages` branch, so the
+   repository size does not grow by a few megabytes per release forever.
+
+Everything degrades cleanly without the signing secret: the packages are built
+unsigned, the repository is not published, and the release itself is unaffected.
+
+### The signing key, and why it exists at all
+
+apt verifies a repository by the signature over its `Release` file and refuses an
+unsigned one. It is right to: the repository is what tells a machine which files
+to install as root. So this needs a **long-lived GPG key** — the opposite of the
+keyless cosign signature over `SHA256SUMS`, which exists precisely so that no key
+has to be kept.
+
+Both are real, and they protect different things:
+
+| | protects | key |
+|---|---|---|
+| cosign over `SHA256SUMS` | that a release came from this repository's workflow | none, keyless |
+| GPG over `Release` / `repomd.xml` | that the repository a machine polls is ours | long-lived |
+
+Creating it, once, on a machine you trust:
+
+```bash
+# RSA rather than ed25519: older rpm builds do not verify EdDSA reliably.
+gpg --batch --passphrase '' --quick-generate-key \
+  "Deckhand Package Signing <you@example.com>" rsa4096 sign never
+
+gpg --armor --export-secret-keys "Deckhand Package Signing" > deckhand-signing-key.asc
+```
+
+Then paste the contents of `deckhand-signing-key.asc` into the repository secret
+**`REPO_GPG_PRIVATE_KEY`** (Settings → Secrets and variables → Actions), back the
+file up somewhere offline, and delete it from the machine.
+
+Two deliberate choices:
+
+* **No passphrase.** A passphrase stored in the same secret store as the key
+  protects nothing. The workflow refuses to start signing if the key cannot sign
+  unattended, rather than failing halfway through publishing.
+* **Sign-only, no expiry.** An expiring repository key breaks `apt update` on
+  every machine that added it, at a moment nobody chose. Rotation is a deliberate
+  act: generate a new key, publish it, and keep signing with both for a while.
+
+If the key ever leaks, whoever has it can serve packages to everyone who added
+this repository. Revoke it (`gpg --gen-revoke`), publish the revocation, generate
+a new one, and say so in a release note.
+
+### Building and testing it locally
+
+The whole thing runs without GitHub, which is how it was verified:
+
+```bash
+sudo apt-get install -y apt-utils createrepo-c gnupg
+export GNUPGHOME=/tmp/gk && mkdir -p $GNUPGHOME && chmod 700 $GNUPGHOME
+gpg --batch --passphrase '' --quick-generate-key "Test Signing <t@example.invalid>" rsa4096 sign never
+gpg --armor --export-secret-keys "Test Signing" > /tmp/key.asc
+
+SIGNING_KEY_FILE=/tmp/key.asc ./packaging/build-packages.sh --tag v0.1.3 --arches amd64:amd64
+./packaging/build-repo.sh --pool dist --site site \
+  --base-url http://127.0.0.1:8099 --key-id "Test Signing"
+
+python3 -m http.server 8099 --directory site &
+sudo install -m644 site/deckhand-archive-keyring.gpg /usr/share/keyrings/
+echo "deb [signed-by=/usr/share/keyrings/deckhand-archive-keyring.gpg] http://127.0.0.1:8099/deb ./" |
+  sudo tee /etc/apt/sources.list.d/deckhand.list
+sudo apt update && sudo apt install deckhand
+```
+
+Keep `$GNUPGHOME` short: gpg-agent's socket lives inside it and a path near 108
+characters fails with "No agent running", which is a memorable way to lose an
+hour.
+
+Worth repeating the negative test too — append a line to `site/deb/Packages`,
+clear `/var/lib/apt/lists/127.0.0.1*` so apt actually refetches, and
+`apt update` must refuse it with a hash mismatch. Without clearing the list apt
+serves the cached index and the test silently proves nothing.
 
 ## Decisions worth knowing
 

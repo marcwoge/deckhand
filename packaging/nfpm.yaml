@@ -77,6 +77,20 @@ deb:
   # operator, never by the package, so there is nothing for dpkg to prompt about.
   fields:
     Bugs: https://github.com/marcwoge/deckhand/issues
+  # Signing is optional and off unless SIGNING_KEY_FILE points at an armoured
+  # private key; an empty value means unsigned, which is what a local build
+  # wants. The passphrase, if the key has one, comes from NFPM_PASSPHRASE.
+  #
+  # apt does not check this signature - it verifies the repository's Release file
+  # instead - but dnf does check the rpm one, which is why the repository can be
+  # served with gpgcheck=1.
+  signature:
+    key_file: ${SIGNING_KEY_FILE}
+    type: origin
+
+rpm:
+  signature:
+    key_file: ${SIGNING_KEY_FILE}
 
 overrides:
   deb:
