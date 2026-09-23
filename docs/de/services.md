@@ -193,13 +193,18 @@ Deployment-Verzeichnisse. Nur du weißt, ob das noch gebraucht wird.
 
 ```bash
 brew tap marcwoge/deckhand
-brew install deckhand
+brew install marcwoge/deckhand/deckhand     # Tap Trust: mit vollem Namen installieren
 ```
 
 ```powershell
 scoop bucket add deckhand https://github.com/marcwoge/scoop-deckhand
 scoop install deckhand
 ```
+
+Homebrews **Tap Trust** ist der Grund für den vollen Namen: ein Tap allein
+erlaubt noch keine Installation über den Kurznamen, weil Code in einem Tap mit
+deinen Rechten läuft. `brew trust --formula marcwoge/deckhand/deckhand` macht
+den Kurznamen danach nutzbar.
 
 Beide installieren die Release-Binärdatei und halten sich selbst aktuell: Tap und
 Bucket erzeugen ihre Datei täglich aus dem neuesten Release neu und nehmen die

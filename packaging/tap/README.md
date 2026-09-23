@@ -7,7 +7,16 @@ health check fails.
 
 ```bash
 brew tap marcwoge/deckhand
-brew install deckhand
+brew install marcwoge/deckhand/deckhand
+```
+
+The fully qualified name is not decoration. Homebrew's **tap trust** means that
+tapping a third-party repository does not by itself let you install from it by
+short name — code in a tap runs with your privileges, so trust is per item. If
+you would rather type `brew install deckhand` afterwards:
+
+```bash
+brew trust --formula marcwoge/deckhand/deckhand
 ```
 
 Then:

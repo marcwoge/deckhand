@@ -62,7 +62,7 @@ sudo apt install ./deckhand_0.1.1_amd64.deb
 sudo rpm -i deckhand-0.1.1-1.x86_64.rpm
 
 # macOS
-brew tap marcwoge/deckhand && brew install deckhand
+brew tap marcwoge/deckhand && brew install marcwoge/deckhand/deckhand
 
 # Windows
 scoop bucket add deckhand https://github.com/marcwoge/scoop-deckhand

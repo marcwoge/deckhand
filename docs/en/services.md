@@ -189,13 +189,18 @@ they are still wanted.
 
 ```bash
 brew tap marcwoge/deckhand
-brew install deckhand
+brew install marcwoge/deckhand/deckhand     # tap trust: install it by its full name
 ```
 
 ```powershell
 scoop bucket add deckhand https://github.com/marcwoge/scoop-deckhand
 scoop install deckhand
 ```
+
+Homebrew's **tap trust** is why the install uses the full name: tapping a
+third-party repository does not by itself allow installing from it by short name,
+because code in a tap runs with your privileges. `brew trust --formula
+marcwoge/deckhand/deckhand` makes the short name work afterwards.
 
 Both install the release binary, and both keep themselves current: the tap and
 the bucket regenerate their file from the newest release daily, taking the
