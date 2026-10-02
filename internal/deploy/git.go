@@ -279,10 +279,14 @@ func extractTar(r io.Reader, destDir string, overwrite bool) (int, error) {
 			count++
 		case tar.TypeSymlink:
 			linkTarget := hdr.Linkname
-			resolved := linkTarget
-			if !filepath.IsAbs(resolved) {
-				resolved = filepath.Join(targetDir, linkTarget)
+			// An absolute link target is refused outright rather than resolved,
+			// so that "/etc/passwd" is rejected on Windows exactly as it is on
+			// unix instead of being read as a relative path.
+			if isAbsoluteInAnyNotation(linkTarget) {
+				return count, fmt.Errorf("refusing symlink %q -> %q: absolute link target",
+					hdr.Name, linkTarget)
 			}
+			resolved := filepath.Join(targetDir, linkTarget)
 			if !within(root, resolved) {
 				return count, fmt.Errorf("refusing symlink %q -> %q: points outside the release directory",
 					hdr.Name, linkTarget)
@@ -349,9 +353,7 @@ func safeJoin(root, name string) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("refusing archive entry with an empty name")
 	}
-	// Absolute in any notation: a unix path, a windows drive letter, a
-	// drive-relative path such as "\\dir", or a UNC path.
-	if filepath.IsAbs(name) || strings.HasPrefix(name, "/") || strings.HasPrefix(name, `\`) {
+	if isAbsoluteInAnyNotation(name) {
 		return "", fmt.Errorf("refusing archive entry with absolute path %q", name)
 	}
 
@@ -388,6 +390,19 @@ func safeJoin(root, name string) (string, error) {
 		return "", fmt.Errorf("refusing archive entry outside the release directory: %q", name)
 	}
 	return target, nil
+}
+
+// isAbsoluteInAnyNotation reports whether a name from an archive is absolute on
+// any platform: a unix path, a windows drive letter, a drive-relative path such
+// as "\dir", or a UNC path.
+//
+// filepath.IsAbs alone is not enough, and the difference is not cosmetic: on
+// Windows it answers false for "/etc/passwd", so a path that every unix host
+// refuses would be treated as relative and quietly joined onto the release
+// directory instead. An archive is the same bytes on every platform, so the
+// answer has to be too.
+func isAbsoluteInAnyNotation(name string) bool {
+	return filepath.IsAbs(name) || strings.HasPrefix(name, "/") || strings.HasPrefix(name, `\`)
 }
 
 func within(root, path string) bool {

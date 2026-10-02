@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/marcwoge/deckhand/internal/config"
+	"github.com/marcwoge/deckhand/internal/procgroup"
 )
 
 // Result describes one finished command.
@@ -75,8 +76,8 @@ func Run(ctx context.Context, c config.Command, o Options) Result {
 	}
 	cmd.Dir = dir
 	cmd.Env = buildEnv(o.Env, c.Env)
-	setProcessGroup(cmd)
-	cmd.Cancel = func() error { return killGroup(cmd) }
+	procgroup.Setup(cmd)
+	cmd.Cancel = func() error { return procgroup.Kill(cmd) }
 	cmd.WaitDelay = 5 * time.Second
 
 	var out bytes.Buffer

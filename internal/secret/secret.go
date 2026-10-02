@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/marcwoge/deckhand/internal/config"
+	"github.com/marcwoge/deckhand/internal/procgroup"
 )
 
 // defaultTTL is how long a value from a command is reused. Asking Vault before
@@ -125,6 +126,12 @@ func run(ctx context.Context, c config.Command, what string) (string, error) {
 	var out, errOut bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errOut
+	// A credential command usually wraps something else - a shell, gpg, a
+	// vault client - so the timeout has to reach the whole tree. Killing only
+	// the wrapper leaves the real process running, which is how a hung "sleep"
+	// outlived its own test on Windows.
+	procgroup.Setup(cmd)
+	cmd.Cancel = func() error { return procgroup.Kill(cmd) }
 	// Do not wait forever for a child that holds the output pipe open after the
 	// context is cancelled.
 	cmd.WaitDelay = 2 * time.Second

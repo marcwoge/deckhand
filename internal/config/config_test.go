@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -65,7 +66,20 @@ func TestRejectsUnknownFields(t *testing.T) {
 	}
 }
 
+// skipWithoutPOSIXPermissions skips an assertion that depends on permission
+// bits. Deckhand deliberately does not enforce them on Windows: the equivalent
+// there is an ACL, os.Chmod maps onto approximately nothing, and a check that
+// cannot fail is worse than no check - see checkPermissions and
+// resolveSecretNamed, which both guard on runtime.GOOS.
+func skipWithoutPOSIXPermissions(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("permission bits are not enforced on Windows; an ACL is not a mode")
+	}
+}
+
 func TestRejectsWorldWritableConfig(t *testing.T) {
+	skipWithoutPOSIXPermissions(t)
 	p := write(t, minimal)
 	if err := os.Chmod(p, 0o666); err != nil {
 		t.Fatal(err)
@@ -121,11 +135,13 @@ func TestTokenResolution(t *testing.T) {
 	if got, err := g.ResolveToken(); err != nil || got != "file-token" {
 		t.Fatalf("token from file = %q, %v", got, err)
 	}
-	if err := os.Chmod(f, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := g.ResolveToken(); err == nil {
-		t.Fatal("a token file readable by others must be refused")
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(f, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := g.ResolveToken(); err == nil {
+			t.Fatal("a token file readable by others must be refused")
+		}
 	}
 }
 
@@ -303,13 +319,15 @@ func TestIncludedFilesAreCheckedToo(t *testing.T) {
 	// (Written first, then chmod'd, because umask would strip the bits.)
 	loose := filepath.Join(incDir, "10-loose.yaml")
 	_ = os.WriteFile(loose, []byte("watch: []\n"), 0o600)
-	if err := os.Chmod(loose, 0o666); err != nil {
-		t.Fatal(err)
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(loose, 0o666); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(main); err == nil || !strings.Contains(err.Error(), "writable") {
+			t.Fatalf("a writable included file must be refused, got %v", err)
+		}
+		_ = os.Chmod(loose, 0o600)
 	}
-	if _, err := Load(main); err == nil || !strings.Contains(err.Error(), "writable") {
-		t.Fatalf("a writable included file must be refused, got %v", err)
-	}
-	_ = os.Chmod(loose, 0o600)
 
 	// Included files may not smuggle in credentials or defaults.
 	_ = os.WriteFile(loose, []byte("github:\n  token: sneaky\n"), 0o600)
@@ -378,13 +396,16 @@ func TestGitHubAppValidation(t *testing.T) {
 	// A key file others can read must be refused, like the token file.
 	loose := filepath.Join(dir, "loose.pem")
 	_ = os.WriteFile(loose, []byte("-----BEGIN RSA PRIVATE KEY-----\nx\n-----END RSA PRIVATE KEY-----\n"), 0o600)
-	if err := os.Chmod(loose, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	body := strings.Replace(minimal, "version: 1",
-		"version: 1\ngithub:\n  app:\n    id: \"1\"\n    private_key_file: "+loose+"\n", 1)
-	if _, err := Load(write(t, body)); err == nil || !strings.Contains(err.Error(), "readable by others") {
-		t.Errorf("a world-readable app key must be refused, got %v", err)
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(loose, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		body := strings.Replace(minimal, "version: 1",
+			"version: 1\ngithub:\n  app:\n    id: \"1\"\n    private_key_file: "+loose+"\n", 1)
+		if _, err := Load(write(t, body)); err == nil ||
+			!strings.Contains(err.Error(), "readable by others") {
+			t.Errorf("a world-readable app key must be refused, got %v", err)
+		}
 	}
 }
 
@@ -533,6 +554,7 @@ watch:
 // A token file others can read is refused for a per-watch credential exactly as
 // it is for the global one - and at load time, not at the first deployment.
 func TestWatchAuthRefusesLooseTokenFile(t *testing.T) {
+	skipWithoutPOSIXPermissions(t)
 	dir := t.TempDir()
 	tokenFile := filepath.Join(dir, "token")
 	if err := os.WriteFile(tokenFile, []byte("secret\n"), 0o600); err != nil {

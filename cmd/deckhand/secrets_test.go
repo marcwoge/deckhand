@@ -137,7 +137,10 @@ watch:
 				t.Errorf("%v output contains the credential %q:\n%s", format, value, out)
 			}
 		}
-		if !strings.Contains(out, tokenFile) {
+		// JSON escapes the separator, so a Windows path appears as
+		// C:\\Users\\... and is not found verbatim.
+		escaped := strings.ReplaceAll(tokenFile, `\`, `\\`)
+		if !strings.Contains(out, tokenFile) && !strings.Contains(out, escaped) {
 			t.Errorf("%v output should still name the file, so an operator can check it:\n%s",
 				format, out)
 		}

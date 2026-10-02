@@ -43,13 +43,26 @@ GOOS=windows go build ./...   # and darwin, and linux/arm64
 
 Please run all four before opening a pull request.
 
+The acceptance tests go further and drive the built binary through a real
+deployment, which is the only way to reach the parts that differ per operating
+system. They clone from GitHub, so they are opt-in:
+
+```bash
+DECKHAND_ACCEPTANCE=1 go test ./acceptance/ -v
+```
+
+The **Platforms** workflow runs them on Linux, macOS and Windows weekly and on
+request. If you are changing anything about paths, links or process handling,
+ask for a run on your branch rather than guessing - that is what
+[issue #10](https://github.com/marcwoge/deckhand/issues/10) is for.
+
 **Use the Go version from `go.mod`.** A newer toolchain compiles happily against
 standard-library functions that the declared version does not have, so code that
 builds on your machine can still fail in CI. Pin the toolchain for a check and
 the problem shows up before you push:
 
 ```bash
-GOTOOLCHAIN=go1.22.0 go vet ./... && GOTOOLCHAIN=go1.22.0 go test ./...
+GOTOOLCHAIN=go1.24.0 go vet ./... && GOTOOLCHAIN=go1.24.0 go test ./...
 ``` CI runs the same checks, and
 deliberately only on pushes to `main` and on tags — it is not there to iterate
 for you.

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -52,7 +53,9 @@ func TestExtractNormalArchive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm()&0o100 == 0 {
+	// Windows has no executable bit to preserve; a file is executable there by
+	// its extension. Asserting it would be asserting that os.Chmod lies.
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o100 == 0 {
 		t.Error("the executable bit must survive extraction")
 	}
 }
@@ -70,11 +73,20 @@ func TestExtractRefusesPathTraversal(t *testing.T) {
 }
 
 func TestExtractRefusesEscapingSymlink(t *testing.T) {
-	dir := t.TempDir()
-	data := tarball(t, &tar.Header{Name: "link", Typeflag: tar.TypeSymlink, Linkname: "/etc/passwd"})
-	_, err := extractTar(bytes.NewReader(data), dir, false)
-	if err == nil || !strings.Contains(err.Error(), "outside") {
-		t.Fatalf("symlink out of the tree must be refused, got %v", err)
+	// Absolute in unix notation and relative-but-escaping are different paths
+	// through the check, and the first one used to be accepted on Windows,
+	// where filepath.IsAbs answers false for "/etc/passwd".
+	for _, linkname := range []string{"/etc/passwd", `\windows\system32`, "../../etc/passwd"} {
+		dir := t.TempDir()
+		data := tarball(t, &tar.Header{Name: "link", Typeflag: tar.TypeSymlink, Linkname: linkname})
+		_, err := extractTar(bytes.NewReader(data), dir, false)
+		if err == nil {
+			t.Errorf("symlink to %q must be refused", linkname)
+			continue
+		}
+		if !strings.Contains(err.Error(), "refusing symlink") {
+			t.Errorf("symlink to %q refused with an unclear error: %v", linkname, err)
+		}
 	}
 }
 
@@ -246,16 +258,19 @@ func TestSafeJoinRejectsEscapes(t *testing.T) {
 // Names that merely look suspicious must still work, or the tool would reject
 // perfectly ordinary repositories.
 func TestSafeJoinAcceptsLegitimateNames(t *testing.T) {
-	root := "/srv/app/releases/abc"
+	// Built with filepath.Join rather than written out: a hard-coded
+	// "/srv/app/releases/abc" is not a path Windows can be a prefix of, and the
+	// result was that every legitimate name looked refused there.
+	root := filepath.Join(string(os.PathSeparator), "srv", "app", "releases", "abc")
 	good := map[string]string{
-		"main.go":              "/srv/app/releases/abc/main.go",
-		"cmd/app/main.go":      "/srv/app/releases/abc/cmd/app/main.go",
-		"test..data.txt":       "/srv/app/releases/abc/test..data.txt",
-		"..hidden":             "/srv/app/releases/abc/..hidden",
-		"a..b/c..d.txt":        "/srv/app/releases/abc/a..b/c..d.txt",
-		"./relative.txt":       "/srv/app/releases/abc/relative.txt",
-		"dir/./file.txt":       "/srv/app/releases/abc/dir/file.txt",
-		".github/workflows/ci": "/srv/app/releases/abc/.github/workflows/ci",
+		"main.go":              filepath.Join(root, "main.go"),
+		"cmd/app/main.go":      filepath.Join(root, "cmd", "app", "main.go"),
+		"test..data.txt":       filepath.Join(root, "test..data.txt"),
+		"..hidden":             filepath.Join(root, "..hidden"),
+		"a..b/c..d.txt":        filepath.Join(root, "a..b", "c..d.txt"),
+		"./relative.txt":       filepath.Join(root, "relative.txt"),
+		"dir/./file.txt":       filepath.Join(root, "dir", "file.txt"),
+		".github/workflows/ci": filepath.Join(root, ".github", "workflows", "ci"),
 	}
 	for name, want := range good {
 		got, err := safeJoin(root, name)
