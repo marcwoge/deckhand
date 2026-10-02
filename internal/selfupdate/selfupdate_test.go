@@ -152,8 +152,13 @@ func TestUpdateInstallsAndKeepsThePrevious(t *testing.T) {
 	if !bytes.Equal(previous, oldBinary) {
 		t.Error("the kept binary is not the one that was replaced")
 	}
-	if info, err := os.Stat(dest); err != nil || info.Mode().Perm()&0o111 == 0 {
-		t.Errorf("the installed binary is not executable: %v %v", info, err)
+	info, err := os.Stat(dest)
+	if err != nil {
+		t.Fatalf("the installed binary is not there: %v", err)
+	}
+	// Windows has no executable bit; an .exe is executable by its extension.
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
+		t.Errorf("the installed binary is not executable, mode %04o", info.Mode().Perm())
 	}
 
 	// And back again, without touching the network.
