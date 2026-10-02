@@ -158,29 +158,50 @@ also mit Beschreibung. Siehe [notifications](notifications.md#das-menü).
 
 ## Deckhand selbst aktuell halten
 
-Deckhand hält alles andere aktuell und wird selbst per Hand aktualisiert — damit
-kommen Sicherheitsfixes spät, und spät ist hier die schlechteste Variante. Ein
-eingebautes `deckhand self-update` ist
-[Issue #15](https://github.com/marcwoge/deckhand/issues/15); bis dahin macht
-`scripts/install-release.sh` dasselbe von außen, mit derselben Prüfung:
+Deckhand hält alles andere aktuell — also auch sich selbst:
 
 ```bash
-sudo ./scripts/install-release.sh                   # neuestes Release
-sudo ./scripts/install-release.sh --check           # Exit 1, wenn es ein Update gibt
-sudo ./scripts/install-release.sh --version v0.1.0  # ein bestimmtes — auch der Weg zurück
+sudo deckhand self-update                   # neuestes Release
+sudo deckhand self-update --check           # Exit 1, wenn es ein Update gibt
+sudo deckhand self-update --version v0.1.1  # ein bestimmtes — auch der Weg zurück
 ```
 
 Es lädt das passende Release-Asset, **prüft die Checksummen-Datei gegen ihre
 cosign-Signatur** (an den Release-Workflow dieses Repositories gebunden und im
-öffentlichen Transparenz-Log vermerkt), dann die Checksumme des Assets, behält
-die alte Binary daneben, ruft `deckhand check` auf und startet den Dienst neu —
-mit Rückrollen, wenn die neue Binary nicht läuft oder der Dienst nicht
-zurückkommt. Es braucht installiertes `cosign`; nur `SHA256SUMS` zu prüfen würde
-nichts beweisen, weil die Checksummen-Datei von derselben Stelle kommt wie die
-Binary.
+öffentlichen Transparenz-Log vermerkt), dann die Checksumme des Assets, lehnt
+eine Binary ab, die nicht einmal ihre eigene Version nennen kann, behält die
+alte daneben, ruft `deckhand check` auf und startet den Dienst neu.
+
+`cosign` muss installiert sein, und es gibt keinen Schalter, der die Prüfung
+abschaltet. Ein Deployment-Worker, der sich selbst aktualisiert, ist ein
+Supply-Chain-Pfad auf jede Maschine, auf der er läuft — und nur `SHA256SUMS` zu
+prüfen würde nichts beweisen, weil diese Datei von derselben Stelle kommt wie
+die Binary.
+
+Scheitert irgendetwas, wird nichts ersetzt. Und wenn die neue Binary liegt und
+sich trotzdem als falsch erweist, braucht der Weg zurück kein Netz:
+
+```bash
+sudo mv /usr/local/bin/deckhand.v0.1.1 /usr/local/bin/deckhand
+sudo systemctl restart deckhand
+```
+
+`--restart none` installiert ohne den Dienst anzufassen, `--dest` aktualisiert
+eine andere Binary als die laufende. Unter macOS und Windows installiert der
+Befehl und nennt danach die passende `launchctl`- bzw. `schtasks`-Zeile, weil es
+dort keine systemd-Unit zum Neustarten gibt.
+
+**Solange die Binary noch kein `self-update` hat** — also von v0.1.1 oder älter
+kommend — macht `scripts/install-release.sh` dasselbe von außen, mit derselben
+Prüfung:
+
+```bash
+sudo ./scripts/install-release.sh
+```
 
 Unbeaufsichtigt ist ein Timer der ehrlichere Weg, statt Deckhand sich selbst
-deployen zu lassen:
+deployen zu lassen (das Einplanen *innerhalb* von Deckhand ist die zweite Hälfte
+von [Issue #15](https://github.com/marcwoge/deckhand/issues/15)):
 
 ```ini
 # /etc/systemd/system/deckhand-update.service
@@ -189,7 +210,7 @@ Description=Update Deckhand from its signed releases
 
 [Service]
 Type=oneshot
-ExecStart=/opt/deckhand/install-release.sh --unit deckhand.service
+ExecStart=/usr/local/bin/deckhand self-update --unit deckhand.service
 ```
 
 ```ini

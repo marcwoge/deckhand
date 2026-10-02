@@ -192,7 +192,9 @@ Complete apart from the two items still marked open.
 | winget, AUR, COPR/OBS, nixpkgs | 📋 [#17](https://github.com/marcwoge/deckhand/issues/17) |
 | Testing on real macOS and Windows machines | 📋 [#10](https://github.com/marcwoge/deckhand/issues/10) |
 | `scripts/install-release.sh` — verified update from outside | ✅ |
-| `deckhand self-update` from signed releases | 📋 [#15](https://github.com/marcwoge/deckhand/issues/15) |
+| `deckhand self-update` — verified update, built in | ✅ [#15](https://github.com/marcwoge/deckhand/issues/15) |
+| Unattended self-update on a schedule (`self_update:`) | 📋 [#15](https://github.com/marcwoge/deckhand/issues/15) |
+
 | Prometheus metrics endpoint bound to localhost | 💭 |
 | Optional inbound webhook mode for people who can expose a port | 💭 |
 

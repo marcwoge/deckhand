@@ -37,6 +37,7 @@ Usage:
   deckhand history [watch] [--limit N]      show the audit log
   deckhand pause [reason] | resume [watch]  hold or release all deployments
   deckhand secrets [--config FILE]          where every credential comes from
+  deckhand self-update [--check]            install the latest signed release
   deckhand service install|uninstall        install as a system service
   deckhand init [--config FILE]             write a commented example config
   deckhand version
@@ -83,6 +84,8 @@ func main() {
 		err = cmdResume(args)
 	case "secrets":
 		err = cmdSecrets(args)
+	case "self-update", "selfupdate":
+		err = cmdSelfUpdate(args)
 	case "service":
 		err = cmdService(args)
 	case "init":
