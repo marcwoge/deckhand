@@ -344,7 +344,7 @@ func (a *WatchAuth) validate() error {
 
 // RegistryAuth is the pull credential for one registry host.
 type RegistryAuth struct {
-	Username        string   `yaml:"username"`
+	Username string `yaml:"username"`
 	// Password holds the credential itself, written into the configuration
 	// file. Prefer one of the three below.
 	Password string `yaml:"password"`
