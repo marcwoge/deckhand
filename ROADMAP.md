@@ -170,6 +170,7 @@ Complete apart from the two items still marked open.
 | Allowed-author verification | ✅ |
 | Reload configuration without restarting (SIGHUP) | ✅ |
 | `deckhand doctor` — diagnose token scope, connectivity and permissions | ✅ |
+| Acceptance tests driving a real deployment on Linux, macOS and Windows | ✅ [#10](https://github.com/marcwoge/deckhand/issues/10) |
 | Signed releases with build provenance | ✅ |
 | A credential per watch instead of one token for everything | ✅ [#14](https://github.com/marcwoge/deckhand/issues/14) |
 | Credentials from a command (`pass`, Vault, 1Password, sops) | ✅ [#16](https://github.com/marcwoge/deckhand/issues/16) |
@@ -190,7 +191,7 @@ Complete apart from the two items still marked open.
 | A Homebrew tap and a Scoop bucket, both self-updating from the signed release | ✅ [#8](https://github.com/marcwoge/deckhand/issues/8) |
 | A signed apt and dnf repository on GitHub Pages (`apt install deckhand`) | ✅ [#17](https://github.com/marcwoge/deckhand/issues/17) |
 | winget, AUR, COPR/OBS, nixpkgs | 📋 [#17](https://github.com/marcwoge/deckhand/issues/17) |
-| Testing on real macOS and Windows machines | 📋 [#10](https://github.com/marcwoge/deckhand/issues/10) |
+| Testing on real macOS and Windows machines (reboot, `--system`, junctions) | 📋 [#10](https://github.com/marcwoge/deckhand/issues/10) |
 | `scripts/install-release.sh` — verified update from outside | ✅ |
 | `deckhand self-update` — verified update, built in | ✅ [#15](https://github.com/marcwoge/deckhand/issues/15) |
 | Unattended self-update on a schedule (`self_update:`) | 📋 [#15](https://github.com/marcwoge/deckhand/issues/15) |
@@ -214,6 +215,10 @@ These come up often enough to be worth naming. Deckhand will not grow into:
 Items marked 📋 are open for pull requests and most of them have an issue with
 implementation notes attached; items marked 💭 need a discussion first.
 Platform testing on macOS and Windows is tracked in
-[#10](https://github.com/marcwoge/deckhand/issues/10) and is the single most
-useful thing an outside contributor can help with. Please open an issue describing the use case before implementing an idea
+[#10](https://github.com/marcwoge/deckhand/issues/10). The **Platforms**
+workflow now drives a real deployment on all three operating systems weekly, so
+what is left there is the part CI cannot be: a `--system` daemon on macOS, a
+reboot, and the Windows junction fallback that a runner never reaches because it
+is an administrator. Reports from a real machine remain the single most useful
+thing an outside contributor can send. Please open an issue describing the use case before implementing an idea
 item, so we can agree on the shape. See [CONTRIBUTING.md](CONTRIBUTING.md).
