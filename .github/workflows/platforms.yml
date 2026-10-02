@@ -43,6 +43,11 @@ jobs:
       - name: A real deployment
         env:
           DECKHAND_ACCEPTANCE: '1'
+          # Hosted runners share their IPs, so anonymous access runs into
+          # GitHub's 60-an-hour limit and the cases fail with nothing wrong.
+          # The token also means they exercise the authenticated path, which is
+          # the one people actually run.
+          DECKHAND_GITHUB_TOKEN: ${{ github.token }}
         run: go test ./acceptance/ -v -timeout 15m
 
       # Informational rather than a gate: a CI runner is not a fair test of a

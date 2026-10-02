@@ -26,6 +26,19 @@ import (
 // failure is about Deckhand rather than about someone else's repository.
 const repo = "marcwoge/deckhand"
 
+// authLine decides whether the cases authenticate.
+//
+// Anonymous access is 60 requests an hour per IP, and hosted runners share
+// theirs - which is how a run on macOS failed with the limit exhausted while
+// nothing was wrong. With a token in the environment the watches use it, which
+// is also the path users actually run.
+func authLine() string {
+	if os.Getenv("DECKHAND_GITHUB_TOKEN") != "" {
+		return ""
+	}
+	return "    auth: none"
+}
+
 func TestMain(m *testing.M) {
 	if os.Getenv("DECKHAND_ACCEPTANCE") != "1" {
 		// Nothing to report; the unit tests cover everything else.
@@ -77,6 +90,7 @@ func writeConfig(t *testing.T, body string) (config, path string) {
 	config = filepath.Join(dir, "deckhand.yaml")
 	body = strings.ReplaceAll(body, "%PATH%", filepath.ToSlash(path))
 	body = strings.ReplaceAll(body, "%REPO%", repo)
+	body = strings.ReplaceAll(body, "%AUTH%", authLine())
 	if err := os.WriteFile(config, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -90,11 +104,13 @@ func writeConfig(t *testing.T, body string) (config, path string) {
 // environment reached it.
 func recordSHA() string {
 	if runtime.GOOS == "windows" {
-		// PowerShell rather than cmd: a redirection target has to be quoted,
-		// and cmd's parsing of the quotes Go puts around an argument does not
-		// survive the trip. Single quotes keep it out of that fight.
+		// PowerShell rather than cmd, whose parsing of the quotes Go puts
+		// around an argument does not survive the trip. And Join-Path rather
+		// than a backslash, because this string goes through YAML on the way:
+		// "...\ran.txt" in a double-quoted scalar is a carriage return
+		// followed by "an.txt", which Windows reports as an illegal path.
 		return `["powershell", "-NoProfile", "-Command",` +
-			` "[IO.File]::WriteAllText($env:DECKHAND_SHARED_DIR + '\ran.txt', $env:DECKHAND_SHA)"]`
+			` "[IO.File]::WriteAllText((Join-Path $env:DECKHAND_SHARED_DIR 'ran.txt'), $env:DECKHAND_SHA)"]`
 	}
 	return `["sh", "-c", "printf %s \"$DECKHAND_SHA\" > \"$DECKHAND_SHARED_DIR/ran.txt\""]`
 }
@@ -135,7 +151,7 @@ defaults:
 watch:
   - name: app
     repo: %REPO%
-    auth: none
+%AUTH%
     trigger: { type: release }
     path: %PATH%
     shared:
@@ -194,7 +210,7 @@ version: 1
 watch:
   - name: app
     repo: %REPO%
-    auth: none
+%AUTH%
     strategy: inplace
     trigger: { type: release }
     path: %PATH%
@@ -229,7 +245,7 @@ defaults:
 watch:
   - name: app
     repo: %REPO%
-    auth: none
+%AUTH%
     trigger: { type: release }
     path: %PATH%
     run:
@@ -261,7 +277,7 @@ version: 1
 watch:
   - name: app
     repo: %REPO%
-    auth: none
+%AUTH%
     trigger: { type: release }
     path: %PATH%
     run:
@@ -295,7 +311,7 @@ version: 1
 watch:
   - name: app
     repo: %REPO%
-    auth: none
+%AUTH%
     trigger: { type: release }
     path: %PATH%
     run:
