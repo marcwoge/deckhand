@@ -345,16 +345,28 @@ func (a *WatchAuth) validate() error {
 // RegistryAuth is the pull credential for one registry host.
 type RegistryAuth struct {
 	Username        string   `yaml:"username"`
-	Password        string   `yaml:"password"`
-	PasswordEnv     string   `yaml:"password_env"`
-	PasswordFile    string   `yaml:"password_file"`
-	PasswordCommand *Command `yaml:"password_command"`
+	// Password holds the credential itself, written into the configuration
+	// file. Prefer one of the three below.
+	Password string `yaml:"password"`
+
+	// EnvVar, File and Command do not hold the credential - they name where to
+	// find it, and they are named after what they are for a reason. A field
+	// called PasswordFile makes a static analyser treat the *path* as a
+	// password, so printing it in "deckhand secrets" or in a "this file is
+	// readable by others" error reads as a leaked credential. The old names
+	// also made that analysis useless where it matters: what should be watched
+	// is Password above, the one field that does hold a secret, and burying it
+	// among three lookalikes is how a real leak hides. The YAML keys are
+	// unchanged.
+	EnvVar  string   `yaml:"password_env"`
+	File    string   `yaml:"password_file"`
+	Command *Command `yaml:"password_command"`
 }
 
 // Spec names where the registry password comes from.
 func (r *RegistryAuth) Spec() SecretSpec {
 	return SecretSpec{What: "registry password", Inline: r.Password,
-		Env: r.PasswordEnv, File: r.PasswordFile, Command: r.PasswordCommand}
+		Env: r.EnvVar, File: r.File, Command: r.Command}
 }
 
 // ResolvePassword reads the registry credential from its configured source.

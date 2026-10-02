@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -662,5 +663,108 @@ watch:
 	// the credential.
 	if strings.Contains(spec.Describe(), "deckhand/github") {
 		t.Errorf("describe = %q, want the arguments left out", spec.Describe())
+	}
+}
+
+// A registry credential has one field holding the value and three naming a
+// place. Only the first is called Password, and that is load-bearing in two
+// directions: a static analyser treats anything named *Password* as a secret, so
+// a path read from PasswordFile is reported as a leaked credential wherever it
+// is printed - and, worse, burying the one field that does hold a secret among
+// three lookalikes makes that analysis useless where it actually matters.
+//
+// The YAML keys are the user-facing API and do not move with the Go names.
+func TestRegistryCredentialFieldNames(t *testing.T) {
+	typ := reflect.TypeOf(RegistryAuth{})
+
+	wantKeys := map[string]string{
+		"password":         "Password", // the credential itself
+		"password_env":     "EnvVar",   // the name of a variable
+		"password_file":    "File",     // a path
+		"password_command": "Command",  // a program to run
+	}
+	seen := map[string]bool{}
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		key := strings.Split(field.Tag.Get("yaml"), ",")[0]
+		want, ok := wantKeys[key]
+		if !ok {
+			continue
+		}
+		seen[key] = true
+		if field.Name != want {
+			t.Errorf("the %q field is called %s, want %s", key, field.Name, want)
+		}
+		if key != "password" && strings.Contains(strings.ToLower(field.Name), "password") {
+			t.Errorf("%s names a place, not the credential; a name with "+
+				"\"password\" in it makes a path look like a secret", field.Name)
+		}
+	}
+	for key := range wantKeys {
+		if !seen[key] {
+			t.Errorf("the %q key is gone; that is the configuration API", key)
+		}
+	}
+}
+
+// The rename above must not have moved anything a configuration file says.
+func TestRegistryPasswordSourcesStillParse(t *testing.T) {
+	dir := t.TempDir()
+	passwordFile := filepath.Join(dir, "registry-password")
+	if err := os.WriteFile(passwordFile, []byte("from-the-file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DECKHAND_TEST_REGISTRY_PASSWORD", "from-the-environment")
+
+	cfg, err := Load(write(t, fmt.Sprintf(`
+version: 1
+registry:
+  inline.example:
+    username: a
+    password: from-the-config
+  env.example:
+    username: b
+    password_env: DECKHAND_TEST_REGISTRY_PASSWORD
+  file.example:
+    username: c
+    password_file: %s
+  command.example:
+    username: d
+    password_command: ["printf", "from-a-command"]
+watch:
+  - name: a
+    repo: acme/a
+    trigger: { type: release }
+    path: /tmp/deckhand-test-a
+    run: [["true"]]
+`, passwordFile)))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	cases := map[string]string{
+		"inline.example": "from-the-config",
+		"env.example":    "from-the-environment",
+		"file.example":   "from-the-file",
+	}
+	for host, want := range cases {
+		auth, ok := cfg.Registry[host]
+		if !ok {
+			t.Errorf("%s is missing from the configuration", host)
+			continue
+		}
+		got, err := auth.ResolvePassword()
+		if err != nil {
+			t.Errorf("%s: %v", host, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("%s resolved to %q, want %q", host, got, want)
+		}
+	}
+	// A command is not run while parsing, so only its shape is checked here.
+	if cmd := cfg.Registry["command.example"].Command; cmd == nil || len(cmd.Cmd) != 2 {
+		t.Errorf("password_command did not parse into a command: %+v",
+			cfg.Registry["command.example"].Command)
 	}
 }

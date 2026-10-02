@@ -80,11 +80,11 @@ watch:
 // configuration below has a distinctive value, and none of them may appear in
 // any of the three output formats.
 //
-// It is also the evidence behind dismissing CodeQL's go/clear-text-logging
-// alerts on this file. That query treats a field named PasswordFile as holding a
-// password, so the *path* of a registry credential counts as sensitive data to
-// it. Renaming the field would silence the query and lose something real: the
-// name is what keeps it watching the field that does hold the value.
+// It is also what makes config.RegistryAuth's field names safe to rely on: only
+// Password holds a credential, and the three fields naming a place are called
+// EnvVar, File and Command. Rename those back to PasswordEnv and friends and a
+// static analyser reports this command as leaking a password, because a path
+// read from a field with "password" in its name looks exactly like one.
 func TestSecretsOutputNeverContainsAValue(t *testing.T) {
 	dir := t.TempDir()
 	tokenFile := filepath.Join(dir, "token")
