@@ -116,6 +116,51 @@ Wie es sich verhält:
   `deckhand check` und nicht beim ersten Deployment. Nach 30 Sekunden wird es
   beendet.
 
+Auch der Schlüsselspeicher des Betriebssystems, ohne dass Deckhand ihn kennen
+muss:
+
+```yaml
+# macOS Keychain
+#   security add-generic-password -s deckhand-github -a deckhand -w 'github_pat_...'
+github:
+  token_command: ["security", "find-generic-password", "-s", "deckhand-github", "-w"]
+
+# Linux Secret Service (GNOME Keyring, KWallet)
+#   secret-tool store --label='Deckhand GitHub' service deckhand key github
+github:
+  token_command: ["secret-tool", "lookup", "service", "deckhand", "key", "github"]
+
+# Windows DPAPI, an das Benutzerkonto gebunden, das die Datei geschrieben hat
+#   Read-Host -AsSecureString | ConvertFrom-SecureString |
+#     Set-Content C:\ProgramData\deckhand\github.dpapi
+github:
+  token_command: ["powershell", "-NoProfile", "-Command",
+    "[Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR((Get-Content C:\\ProgramData\\deckhand\\github.dpapi | ConvertTo-SecureString)))"]
+```
+
+Bei jedem ist die Bedingung wichtiger als die Syntax:
+
+* **Der macOS-Keychain** gehört einem Benutzer und wird mit der Login-Sitzung
+  entsperrt. Ein von `deckhand service install` eingerichteter User-Agent kommt
+  dran, ein `--system`-Daemon nicht — der hat keinen Login-Keychain. Für einen
+  Daemon den Eintrag in den System-Keychain legen
+  (`security add-generic-password -A -s deckhand-github -w '…'
+  /Library/Keychains/System.keychain`, als root) und diesen Pfad an
+  `find-generic-password` übergeben.
+* **Der Secret Service** braucht eine D-Bus-Sitzung und einen entsperrten
+  Keyring. Ein Server ohne Desktop hat beides nicht — das ist also die Antwort
+  für Arbeitsplätze; auf dem Server systemd-creds, siehe unten.
+* **DPAPI** bindet die Datei an das Konto, das sie geschrieben hat; die
+  geplante Aufgabe muss also unter demselben Konto laufen. Auf einen anderen
+  Benutzer oder eine andere Maschine kopiert ist die Datei wertlos — genau
+  darum geht es.
+
+Deckhand hat **absichtlich keine eingebaute Keychain-Unterstützung**. Sie wäre
+plattformspezifischer Code und unter Linux ein D-Bus-Client, um dorthin zu
+kommen, wo drei Zeilen Konfiguration schon sind. Wenn `token_command` einen Fall
+nicht abdeckt, gehört das in
+[Issue #16](https://github.com/marcwoge/deckhand/issues/16).
+
 **2. An die Maschine binden mit systemd-creds.** Unter Linux mit systemd ist das
 bereits gelöst, und Deckhand braucht dafür keinen Code:
 

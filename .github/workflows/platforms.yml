@@ -1,0 +1,60 @@
+# Drives a real deployment on each operating system.
+#
+# The unit tests pass everywhere, but the things that actually differ per
+# platform cannot be reached that way: the "current" link (a symlink, or a
+# junction on Windows without Developer Mode), the shared-path fallbacks,
+# killing a command and its children on timeout, and the in-place strategy that
+# exists for when links are unavailable. Issue #10 is the list this works
+# through.
+#
+# Not on every push: these runners are slower, and nothing here changes between
+# commits that do not touch the deployment path. Weekly, and whenever you ask.
+name: Platforms
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '41 4 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing should not hide the others - that is the whole
+      # point of running them.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Unit tests
+        run: go test ./...
+
+      - name: A real deployment
+        env:
+          DECKHAND_ACCEPTANCE: '1'
+        run: go test ./acceptance/ -v -timeout 15m
+
+      # Informational rather than a gate: a CI runner is not a fair test of a
+      # login session, which is what a user agent or a user systemd unit needs.
+      # The output is here so issue #10 can be worked through with something
+      # better than guesses.
+      - name: Install as a service (informational)
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -x
+          go build -o dh ./cmd/deckhand
+          ./dh init --config dh.yaml
+          ./dh service install --config dh.yaml || echo "service install failed, see above"
+          ./dh service uninstall --config dh.yaml || echo "service uninstall failed, see above"

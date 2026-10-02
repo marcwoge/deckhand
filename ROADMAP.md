@@ -177,7 +177,7 @@ Complete apart from the two items still marked open.
 | `deckhand secrets` — where every credential comes from, no values | ✅ |
 | `scripts/encrypt-credentials.sh` — move credential files into systemd-creds | ✅ |
 | Process hardening: `PR_SET_DUMPABLE`, `LimitCORE=0` | ✅ |
-| OS keychains (macOS Keychain, DPAPI, Secret Service) | 📋 [#16](https://github.com/marcwoge/deckhand/issues/16) |
+| OS keychains (macOS Keychain, DPAPI, Secret Service) via `token_command` | ✅ [#16](https://github.com/marcwoge/deckhand/issues/16) |
 | `before:` commands and deploy stages | 📋 |
 | Private submodule support | 📋 |
 

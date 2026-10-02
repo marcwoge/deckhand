@@ -110,6 +110,49 @@ How it behaves:
 * **The command runs at startup**, so a broken one fails `deckhand check` rather
   than the first deployment. It is killed after 30 seconds.
 
+Including the operating system's own keystore, which needs no Deckhand support
+of its own:
+
+```yaml
+# macOS Keychain
+#   security add-generic-password -s deckhand-github -a deckhand -w 'github_pat_...'
+github:
+  token_command: ["security", "find-generic-password", "-s", "deckhand-github", "-w"]
+
+# Linux Secret Service (GNOME Keyring, KWallet)
+#   secret-tool store --label='Deckhand GitHub' service deckhand key github
+github:
+  token_command: ["secret-tool", "lookup", "service", "deckhand", "key", "github"]
+
+# Windows DPAPI, bound to the user account that stored it
+#   Read-Host -AsSecureString | ConvertFrom-SecureString |
+#     Set-Content C:\ProgramData\deckhand\github.dpapi
+github:
+  token_command: ["powershell", "-NoProfile", "-Command",
+    "[Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR((Get-Content C:\\ProgramData\\deckhand\\github.dpapi | ConvertTo-SecureString)))"]
+```
+
+Each has a condition that matters more than the syntax:
+
+* **The macOS Keychain** is per user and unlocked with the login session. A user
+  agent installed by `deckhand service install` can read it; a `--system`
+  daemon cannot, because it has no login keychain. For a daemon, store the item
+  in the System keychain (`security add-generic-password -A -s deckhand-github
+  -w '…' /Library/Keychains/System.keychain`, as root) and pass that path to
+  `find-generic-password`.
+* **The Secret Service** needs a D-Bus session and an unlocked keyring. A
+  headless server has neither, so this is a workstation answer; on a server use
+  systemd-creds below.
+* **DPAPI** binds the file to the account that wrote it, so the scheduled task
+  has to run as that same account. Copied to another user or machine, the file
+  is worthless — which is the point.
+
+Deckhand deliberately has **no built-in keychain support**. It would mean
+platform-specific code and, on Linux, a D-Bus client, to reach what three lines
+of configuration already reach. If you hit a case `token_command` cannot
+express, [issue #16](https://github.com/marcwoge/deckhand/issues/16) is where to
+say so.
+
 **2. Bind it to the machine with systemd-creds.** On Linux with systemd this is
 already solved, and Deckhand needs no code for it:
 
