@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -160,7 +161,8 @@ func TestReleaseWorkflowScriptsExist(t *testing.T) {
 			t.Errorf("%s: %v", script, err)
 			continue
 		}
-		if info.Mode().Perm()&0o111 == 0 {
+		// See TestMaintainerScripts: a Windows checkout has no executable bit.
+		if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
 			t.Errorf("%s is not executable (mode %04o)", script, info.Mode().Perm())
 		}
 	}

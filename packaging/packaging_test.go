@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -86,7 +87,10 @@ func TestMaintainerScripts(t *testing.T) {
 			t.Errorf("%s: %v", want, err)
 			continue
 		}
-		if info.Mode().Perm()&0o111 == 0 {
+		// A git checkout on Windows carries no executable bit, so there is
+		// nothing to assert there. It matters on the machines that build the
+		// packages, which are not Windows.
+		if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
 			t.Errorf("%s (%s) is not executable, mode %04o", want, path, info.Mode().Perm())
 		}
 	}

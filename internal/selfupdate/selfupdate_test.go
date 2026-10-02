@@ -1,6 +1,7 @@
 package selfupdate
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -8,8 +9,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -63,7 +67,7 @@ func (r *release) updater(t *testing.T, current string) (*Updater, string) {
 	t.Helper()
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "deckhand")
-	if err := os.WriteFile(dest, []byte(script("the old one")), 0o755); err != nil {
+	if err := os.WriteFile(dest, oldBinary, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return &Updater{
@@ -76,14 +80,55 @@ func (r *release) updater(t *testing.T, current string) (*Updater, string) {
 	}, dest
 }
 
-// script is a stand-in for the binary: it has to actually run, because the
-// updater refuses to install something that cannot state its version.
-func script(what string) string {
-	return "#!/bin/sh\necho 'deckhand " + what + "'\n"
+var (
+	stubOnce  sync.Once
+	stubBytes []byte
+	stubErr   error
+)
+
+// stub is a stand-in for a release binary, and it has to be a real executable:
+// the updater refuses to install something that cannot state its version, and a
+// shell script named .exe is not something Windows can run. So one is compiled
+// once and reused.
+func stub(t *testing.T) []byte {
+	t.Helper()
+	stubOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "deckhand-stub-")
+		if err != nil {
+			stubErr = err
+			return
+		}
+		defer os.RemoveAll(dir)
+		source := filepath.Join(dir, "main.go")
+		body := "package main\n\nimport \"fmt\"\n\n" +
+			"func main() { fmt.Println(\"deckhand stub\") }\n"
+		if err := os.WriteFile(source, []byte(body), 0o600); err != nil {
+			stubErr = err
+			return
+		}
+		out := filepath.Join(dir, "stub")
+		if runtime.GOOS == "windows" {
+			out += ".exe"
+		}
+		build := exec.Command("go", "build", "-o", out, source)
+		if combined, err := build.CombinedOutput(); err != nil {
+			stubErr = fmt.Errorf("building the stub: %w: %s", err, combined)
+			return
+		}
+		stubBytes, stubErr = os.ReadFile(out)
+	})
+	if stubErr != nil {
+		t.Fatal(stubErr)
+	}
+	return stubBytes
 }
 
+// oldBinary is whatever is being replaced. Nothing executes it, so it only has
+// to be recognisable.
+var oldBinary = []byte("the old one, not an executable at all")
+
 func TestUpdateInstallsAndKeepsThePrevious(t *testing.T) {
-	rel := newRelease(t, "v9.9.9", []byte(script("v9.9.9")))
+	rel := newRelease(t, "v9.9.9", stub(t))
 	u, dest := rel.updater(t, "v0.1.1")
 
 	result, err := u.Update(context.Background(), "v9.9.9")
@@ -94,8 +139,8 @@ func TestUpdateInstallsAndKeepsThePrevious(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(installed), "v9.9.9") {
-		t.Errorf("the destination still holds %q", installed)
+	if !bytes.Equal(installed, stub(t)) {
+		t.Error("the destination does not hold the downloaded binary")
 	}
 	if result.Previous == "" {
 		t.Fatal("no previous binary was kept; a rollback would need the network")
@@ -104,8 +149,8 @@ func TestUpdateInstallsAndKeepsThePrevious(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the kept binary is unreadable: %v", err)
 	}
-	if !strings.Contains(string(previous), "the old one") {
-		t.Errorf("the kept binary holds %q", previous)
+	if !bytes.Equal(previous, oldBinary) {
+		t.Error("the kept binary is not the one that was replaced")
 	}
 	if info, err := os.Stat(dest); err != nil || info.Mode().Perm()&0o111 == 0 {
 		t.Errorf("the installed binary is not executable: %v %v", info, err)
@@ -116,15 +161,15 @@ func TestUpdateInstallsAndKeepsThePrevious(t *testing.T) {
 		t.Fatal(err)
 	}
 	back, _ := os.ReadFile(dest)
-	if !strings.Contains(string(back), "the old one") {
-		t.Errorf("after the rollback the destination holds %q", back)
+	if !bytes.Equal(back, oldBinary) {
+		t.Error("the rollback did not put the previous binary back")
 	}
 }
 
 // Checking SHA256SUMS alone would prove nothing, so a failing signature has to
 // stop everything - and leave the working binary where it is.
 func TestFailedVerificationChangesNothing(t *testing.T) {
-	rel := newRelease(t, "v9.9.9", []byte(script("v9.9.9")))
+	rel := newRelease(t, "v9.9.9", stub(t))
 	u, dest := rel.updater(t, "v0.1.1")
 	u.Verify = func(context.Context, string, string, string) error {
 		return fmt.Errorf("no matching signatures")
@@ -133,14 +178,13 @@ func TestFailedVerificationChangesNothing(t *testing.T) {
 	if _, err := u.Update(context.Background(), "v9.9.9"); err == nil {
 		t.Fatal("an unverifiable release must not be installed")
 	}
-	body, _ := os.ReadFile(dest)
-	if !strings.Contains(string(body), "the old one") {
-		t.Errorf("the destination was touched: %q", body)
+	if body, _ := os.ReadFile(dest); !bytes.Equal(body, oldBinary) {
+		t.Error("the destination was touched")
 	}
 }
 
 func TestMissingSignatureIsRefused(t *testing.T) {
-	rel := newRelease(t, "v9.9.9", []byte(script("v9.9.9")))
+	rel := newRelease(t, "v9.9.9", stub(t))
 	rel.noBundle = true
 	u, dest := rel.updater(t, "v0.1.1")
 
@@ -151,17 +195,16 @@ func TestMissingSignatureIsRefused(t *testing.T) {
 	if !strings.Contains(err.Error(), "not signed") {
 		t.Errorf("error = %v, want it to say the release is not signed", err)
 	}
-	body, _ := os.ReadFile(dest)
-	if !strings.Contains(string(body), "the old one") {
-		t.Errorf("the destination was touched: %q", body)
+	if body, _ := os.ReadFile(dest); !bytes.Equal(body, oldBinary) {
+		t.Error("the destination was touched")
 	}
 }
 
 func TestChecksumMismatchIsRefused(t *testing.T) {
-	rel := newRelease(t, "v9.9.9", []byte(script("v9.9.9")))
+	rel := newRelease(t, "v9.9.9", stub(t))
 	// Serve a different binary than the one the checksums describe, which is
 	// what a substituted asset looks like.
-	rel.assets[AssetName("v9.9.9")] = []byte(script("tampered"))
+	rel.assets[AssetName("v9.9.9")] = append(stub(t), " tampered"...)
 	u, dest := rel.updater(t, "v0.1.1")
 
 	_, err := u.Update(context.Background(), "v9.9.9")
@@ -171,9 +214,8 @@ func TestChecksumMismatchIsRefused(t *testing.T) {
 	if !strings.Contains(err.Error(), "checksum mismatch") {
 		t.Errorf("error = %v", err)
 	}
-	body, _ := os.ReadFile(dest)
-	if !strings.Contains(string(body), "the old one") {
-		t.Errorf("the destination was touched: %q", body)
+	if body, _ := os.ReadFile(dest); !bytes.Equal(body, oldBinary) {
+		t.Error("the destination was touched")
 	}
 }
 
@@ -186,14 +228,13 @@ func TestABinaryThatDoesNotRunIsRefused(t *testing.T) {
 	if _, err := u.Update(context.Background(), "v9.9.9"); err == nil {
 		t.Fatal("a binary that does not run must not be installed")
 	}
-	body, _ := os.ReadFile(dest)
-	if !strings.Contains(string(body), "the old one") {
-		t.Errorf("the working binary is gone, leaving %q", body)
+	if body, _ := os.ReadFile(dest); !bytes.Equal(body, oldBinary) {
+		t.Error("the working binary is gone")
 	}
 }
 
 func TestLatestReadsTheTag(t *testing.T) {
-	rel := newRelease(t, "v1.2.3", []byte(script("v1.2.3")))
+	rel := newRelease(t, "v1.2.3", stub(t))
 	u := &Updater{API: rel.srv.URL, Download: rel.srv.URL, Dest: filepath.Join(t.TempDir(), "d")}
 	got, err := u.Latest(context.Background())
 	if err != nil {
