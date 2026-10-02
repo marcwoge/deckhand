@@ -45,9 +45,18 @@ Everything here can be overridden per watch.
 | `audit.max_size` | `10MB` | Rotate the audit log past this size. `0` disables rotation. |
 | `audit.keep` | `5` | How many rotated logs to keep. `deckhand history` reads them all. |
 
-The default state directory is `~/.local/state/deckhand` for a normal user,
-`/var/lib/deckhand` for root, and `%ProgramData%\deckhand\state` on Windows.
-`$DECKHAND_STATE_DIR` overrides it.
+The default state directory is:
+
+| | |
+|---|---|
+| Linux, macOS, as a user | `$XDG_STATE_HOME/deckhand`, or `~/.local/state/deckhand` |
+| Linux, macOS, as root | `/var/lib/deckhand` |
+| Windows | `%LOCALAPPDATA%\deckhand\state` |
+
+`$DECKHAND_STATE_DIR` overrides all of it, which is what the generated systemd
+unit and the `.deb`/`.rpm` packages use to point at `/var/lib/deckhand`. Set
+`defaults.state_dir` when the service runs as its own account, so that a command
+**you** run by hand reads the same state as the service.
 
 ## `include`
 

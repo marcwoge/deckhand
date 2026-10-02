@@ -90,7 +90,11 @@ func writeConfig(t *testing.T, body string) (config, path string) {
 // environment reached it.
 func recordSHA() string {
 	if runtime.GOOS == "windows" {
-		return `["cmd", "/c", "echo %DECKHAND_SHA%>\"%DECKHAND_SHARED_DIR%\\ran.txt\""]`
+		// PowerShell rather than cmd: a redirection target has to be quoted,
+		// and cmd's parsing of the quotes Go puts around an argument does not
+		// survive the trip. Single quotes keep it out of that fight.
+		return `["powershell", "-NoProfile", "-Command",` +
+			` "[IO.File]::WriteAllText($env:DECKHAND_SHARED_DIR + '\ran.txt', $env:DECKHAND_SHA)"]`
 	}
 	return `["sh", "-c", "printf %s \"$DECKHAND_SHA\" > \"$DECKHAND_SHARED_DIR/ran.txt\""]`
 }

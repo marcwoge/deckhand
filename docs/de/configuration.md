@@ -45,10 +45,18 @@ Alles hier lässt sich pro Watch überschreiben.
 | `audit.max_size` | `10MB` | Ab dieser Größe wird das Audit-Log rotiert. `0` schaltet die Rotation ab. |
 | `audit.keep` | `5` | Wie viele rotierte Logs aufbewahrt werden. `deckhand history` liest alle. |
 
-Das Standard-Zustandsverzeichnis ist `~/.local/state/deckhand` für einen
-normalen Benutzer, `/var/lib/deckhand` für root und
-`%ProgramData%\deckhand\state` unter Windows. `$DECKHAND_STATE_DIR` überschreibt
-es.
+Das Standard-Zustandsverzeichnis ist:
+
+| | |
+|---|---|
+| Linux, macOS, als Benutzer | `$XDG_STATE_HOME/deckhand`, sonst `~/.local/state/deckhand` |
+| Linux, macOS, als root | `/var/lib/deckhand` |
+| Windows | `%LOCALAPPDATA%\deckhand\state` |
+
+`$DECKHAND_STATE_DIR` überschreibt alles davon — genau das nutzen die erzeugte
+systemd-Unit und die `.deb`/`.rpm`-Pakete, um auf `/var/lib/deckhand` zu zeigen.
+Setze `defaults.state_dir`, wenn der Dienst unter eigenem Konto läuft, damit ein
+Befehl, den **du** aufrufst, denselben Zustand liest wie der Dienst.
 
 ## `include`
 

@@ -287,10 +287,7 @@ func DefaultStateDir() string {
 	if os.Geteuid() == 0 {
 		return systemStateDir()
 	}
-	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".local", "state", "deckhand")
-	}
-	return filepath.Join(os.TempDir(), "deckhand")
+	return userStateDir()
 }
 
 // StateDir returns the directory in use.
