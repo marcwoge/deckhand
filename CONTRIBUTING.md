@@ -62,7 +62,7 @@ builds on your machine can still fail in CI. Pin the toolchain for a check and
 the problem shows up before you push:
 
 ```bash
-GOTOOLCHAIN=go1.24.0 go vet ./... && GOTOOLCHAIN=go1.24.0 go test ./...
+GOTOOLCHAIN=go1.27.0 go vet ./... && GOTOOLCHAIN=go1.27.0 go test ./...
 ``` CI runs the same checks, and
 deliberately only on pushes to `main` and on tags — it is not there to iterate
 for you.
