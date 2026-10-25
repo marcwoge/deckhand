@@ -71,15 +71,17 @@ func (e *Engine) deployTarget(ctx context.Context, w *config.Watch, t *gh.Target
 	duration := time.Since(start)
 
 	if err == nil {
-		st.PreviousRelease, st.PreviousSHA = st.CurrentRelease, st.LastSHA
-		st.CurrentRelease = currentReleaseDir(w, d, t)
-		st.LastSHA, st.LastRef = t.SHA, t.Ref
-		st.ActiveSHA, st.ActiveRelease = t.SHA, st.CurrentRelease
-		st.LastSuccess = time.Now().UTC()
-		st.LastError = ""
-		st.Failures = 0
+		haltCleared := markDeployed(st, currentReleaseDir(w, d, t), t.SHA, t.Ref)
 		if err := st.Save(); err != nil {
 			log("warning: could not save state: %v", err)
+		}
+		if haltCleared {
+			// Worth saying: the operator asked for this deployment precisely
+			// because the watch was stuck, and otherwise nothing would report
+			// that it is running again.
+			log("halt cleared: this deployment passed its checks")
+			_ = e.audit.Write(audit.Event{Watch: w.Name, Repo: w.Repo, Action: "resume",
+				Result: "ok", SHA: t.SHA, Message: "cleared by a successful deployment"})
 		}
 		if w.NeedsCheckout() {
 			d.Prune(w.KeepReleases, st.CurrentRelease, st.PreviousRelease)
@@ -169,6 +171,31 @@ func (e *Engine) deployTarget(ctx context.Context, w *config.Watch, t *gh.Target
 			Host: e.host, Detail: fmt.Sprintf("halted after %d consecutive failures", st.Failures)})
 	}
 	return failure
+}
+
+// markDeployed moves the state forward after a deployment that passed its
+// checks, and reports whether that cleared a halt.
+//
+// Clearing it is the point: a watch halts to stop a loop of failures, and a
+// deployment that passes its checks is the evidence that the cause is gone.
+// Leaving the flag set meant "HALTED (0 failures)" in the status table and a
+// watch that stayed stuck until someone happened to run "deckhand resume".
+//
+// A rollback deliberately does not clear it. Going back to the previous
+// revision does not fix the one the trigger still points at, so the halt is
+// what stops the broken revision from being deployed again on the next poll.
+func markDeployed(st *deploy.State, releaseDir, sha, ref string) (haltCleared bool) {
+	st.PreviousRelease, st.PreviousSHA = st.CurrentRelease, st.LastSHA
+	st.CurrentRelease = releaseDir
+	st.LastSHA, st.LastRef = sha, ref
+	st.ActiveSHA, st.ActiveRelease = sha, releaseDir
+	st.LastSuccess = time.Now().UTC()
+	st.LastError = ""
+	st.Failures = 0
+
+	haltCleared = st.Halted
+	st.Halted = false
+	return haltCleared
 }
 
 // runDeploySteps performs fetch → verify → prepare → activate → run → health.

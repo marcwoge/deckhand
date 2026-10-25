@@ -123,6 +123,26 @@ func nothing() string {
 	return `["true"]`
 }
 
+// failing is a command that fails on every platform.
+func failing() string {
+	if runtime.GOOS == "windows" {
+		return `["cmd", "/c", "exit", "1"]`
+	}
+	return `["false"]`
+}
+
+// rewriteConfig replaces a configuration in place, keeping the state directory
+// the same so the second run sees what the first one recorded.
+func rewriteConfig(t *testing.T, config, path, body string) {
+	t.Helper()
+	body = strings.ReplaceAll(body, "%PATH%", filepath.ToSlash(path))
+	body = strings.ReplaceAll(body, "%REPO%", repo)
+	body = strings.ReplaceAll(body, "%AUTH%", authLine())
+	if err := os.WriteFile(config, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // isRevision rejects what a failed environment expansion looks like - the
 // literal variable name, or an empty file - rather than only checking a length.
 func isRevision(s string) bool {
@@ -338,4 +358,59 @@ func firstLineContaining(text, want string) string {
 		}
 	}
 	return ""
+}
+
+// The path from issue #19, through the CLI the report came from: a watch that
+// failed until it halted, then a deployment that works. The halt has to go with
+// it, or the watch stays stuck and the status table says "HALTED (0 failures)".
+func TestSuccessfulDeployClearsAHaltedWatch(t *testing.T) {
+	bin := binary(t)
+	template := `
+version: 1
+defaults:
+  failure_limit: 1
+watch:
+  - name: app
+    repo: %REPO%
+%AUTH%
+    trigger: { type: release }
+    path: %PATH%
+    run:
+      - %RUN%
+`
+	config, path := writeConfig(t, strings.Replace(template, "%RUN%", failing(), 1))
+
+	// First: the run step fails, which trips the failure limit.
+	if out, err := deckhand(t, bin, config, "deploy", "app", "--force"); err == nil {
+		t.Fatalf("a failing run step must fail the deployment:\n%s", out)
+	}
+	status, err := deckhand(t, bin, config, "status")
+	if err != nil {
+		t.Fatalf("status: %v\n%s", err, status)
+	}
+	if !strings.Contains(status, "HALTED") {
+		t.Fatalf("the watch should be halted after reaching the failure limit:\n%s", status)
+	}
+	// And it should say what to do about it, not only that it happened.
+	if !strings.Contains(status, "deckhand resume app") {
+		t.Errorf("status does not say how to resume a halted watch:\n%s", status)
+	}
+
+	// Then: the cause is fixed and the deployment passes.
+	rewriteConfig(t, config, path, strings.Replace(template, "%RUN%", nothing(), 1))
+	out, err := deckhand(t, bin, config, "deploy", "app", "--force")
+	if err != nil {
+		t.Fatalf("deploy after fixing the cause: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "halt cleared") {
+		t.Errorf("the deployment did not report clearing the halt:\n%s", out)
+	}
+
+	status, err = deckhand(t, bin, config, "status")
+	if err != nil {
+		t.Fatalf("status: %v\n%s", err, status)
+	}
+	if strings.Contains(status, "HALTED") {
+		t.Errorf("the watch is still halted after a successful deployment:\n%s", status)
+	}
 }

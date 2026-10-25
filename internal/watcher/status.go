@@ -87,21 +87,7 @@ func (e *Engine) PrintStatus(w io.Writer, asJSON bool) error {
 		if !s.LastSuccess.IsZero() {
 			last = humanAgo(s.LastSuccess)
 		}
-		state := "ok"
-		switch {
-		case !s.Enabled:
-			state = "disabled"
-		case s.ActiveSHA != "" && s.ActiveSHA != s.SHA:
-			// What is live is not what last succeeded: a deployment failed and
-			// could not be rolled back.
-			state = "LIVE " + deploy.Short(s.ActiveSHA) + " UNVERIFIED"
-		case s.Halted:
-			state = fmt.Sprintf("HALTED (%d failures)", s.Failures)
-		case s.Failures > 0:
-			state = fmt.Sprintf("%d failures", s.Failures)
-		case s.LastSuccess.IsZero():
-			state = "pending"
-		}
+		state := watchState(s)
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", s.Name, s.Repo, s.Trigger, rev, last, state)
 	}
 	if err := tw.Flush(); err != nil {
@@ -111,8 +97,49 @@ func (e *Engine) PrintStatus(w io.Writer, asJSON bool) error {
 		if s.LastError != "" && (s.Halted || s.Failures > 0) {
 			fmt.Fprintf(w, "\n%s: last error: %s\n", s.Name, s.LastError)
 		}
+		// A halted watch deploys nothing until someone acts, so the table
+		// should not be the only place that says so.
+		if s.Halted {
+			fmt.Fprintf(w, "%s: halted - fix the cause, then: deckhand resume %s\n",
+				s.Name, s.Name)
+		}
 	}
 	return nil
+}
+
+// watchState is the state column.
+//
+// It is built from parts rather than picked from a switch, because the facts it
+// reports are not alternatives. A watch that failed with nothing to roll back
+// to is both live on an unverified revision *and* halted, and a switch showed
+// only whichever case came first - which is how a halted watch could sit in the
+// table looking merely unverified, deploying nothing, with no hint why.
+func watchState(s Status) string {
+	if !s.Enabled {
+		// Nothing else about it matters while it is switched off.
+		return "disabled"
+	}
+
+	var parts []string
+	if s.Halted {
+		parts = append(parts, fmt.Sprintf("HALTED (%d failures)", s.Failures))
+	}
+	if s.ActiveSHA != "" && s.ActiveSHA != s.SHA {
+		// What is live is not what last succeeded: a deployment failed and
+		// could not be rolled back.
+		parts = append(parts, "LIVE "+deploy.Short(s.ActiveSHA)+" UNVERIFIED")
+	}
+	if len(parts) > 0 {
+		return strings.Join(parts, ", ")
+	}
+
+	switch {
+	case s.Failures > 0:
+		return fmt.Sprintf("%d failures", s.Failures)
+	case s.LastSuccess.IsZero():
+		return "pending"
+	}
+	return "ok"
 }
 
 func humanAgo(t time.Time) string {
