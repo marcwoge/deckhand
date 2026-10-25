@@ -65,6 +65,7 @@ with signed checksums and build provenance.
 | GitHub App authentication with self-renewing installation tokens | ✅ |
 | GitHub Enterprise Server support (`github.api`, `github.host`) | ✅ |
 | Split configuration across an include directory | ✅ |
+| Warns when Compose would name every `releases` project `current` | ✅ [#20](https://github.com/marcwoge/deckhand/issues/20) |
 
 ### Triggers
 | Feature | Status |
@@ -106,6 +107,7 @@ with signed checksums and build provenance.
 | Automatic rollback to the revision that was running, re-running the command | ✅ |
 | Manual `deckhand rollback` | ✅ |
 | Circuit breaker: a watch halts after N consecutive failures | ✅ |
+| A successful deployment clears the halt; a rollback deliberately does not | ✅ [#19](https://github.com/marcwoge/deckhand/issues/19) |
 | One deployment at a time per watch | ✅ |
 | State survives restarts, upgrades and reboots | ✅ |
 | State records what is physically live, not only what last succeeded | ✅ |
@@ -125,9 +127,12 @@ with signed checksums and build provenance.
 |---|---|
 | `status`, `history`, `deploy`, `rollback`, `pause`, `resume` | ✅ |
 | `deckhand doctor`: connectivity, credentials, permissions, resolvable triggers | ✅ |
+| `status` shows a halt beside the live revision and names `deckhand resume` | ✅ [#19](https://github.com/marcwoge/deckhand/issues/19) |
+| `check` and `doctor` name the environment variable that is not set | ✅ [#21](https://github.com/marcwoge/deckhand/issues/21) |
 | Reload the configuration on SIGHUP without stopping deployments | ✅ |
 | Append-only JSON Lines audit log | ✅ |
 | Service installation for systemd, launchd and Windows Task Scheduler | ✅ |
+| `service install --env-file`, written as a strict `EnvironmentFile=` | ✅ [#21](https://github.com/marcwoge/deckhand/issues/21) |
 | Hardened systemd unit (NoNewPrivileges, ProtectSystem, …) | ✅ |
 | Notifications via webhook, Slack, ntfy or Telegram | ✅ |
 | Several notification channels, each with its own event filter | ✅ |
@@ -196,6 +201,10 @@ Complete apart from the two items still marked open.
 | `deckhand self-update` — verified update, built in | ✅ [#15](https://github.com/marcwoge/deckhand/issues/15) |
 | Unattended self-update on a schedule (`self_update:`) | 📋 [#15](https://github.com/marcwoge/deckhand/issues/15) |
 
+## Later — ideas, nothing promised
+
+| Idea | Status |
+|---|---|
 | Prometheus metrics endpoint bound to localhost | 💭 |
 | Optional inbound webhook mode for people who can expose a port | 💭 |
 
