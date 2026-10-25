@@ -67,7 +67,7 @@ git push -u origin main
 Then check that it works:
 
 ```bash
-brew tap marcwoge/deckhand && brew install deckhand
+brew tap marcwoge/deckhand && brew install marcwoge/deckhand/deckhand
 ```
 
 ```powershell
