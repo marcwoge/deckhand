@@ -790,3 +790,102 @@ watch:
 			cfg.Registry["command.example"].Command)
 	}
 }
+
+// With the releases strategy every watch runs in <path>/current, so Compose
+// derives the same project name for all of them and two compose-based watches
+// on one host collide - sharing networks and volumes, and "--remove-orphans"
+// on one removing the other's containers (#20).
+func TestComposeWithoutProjectName(t *testing.T) {
+	compose := func(args ...string) Command { return Command{Cmd: args} }
+
+	cases := []struct {
+		name  string
+		watch Watch
+		warn  bool
+	}{
+		{
+			name: "docker compose with no project name",
+			watch: Watch{Strategy: StrategyReleases, Trigger: Trigger{Type: TriggerRelease},
+				Run: []Command{compose("docker", "compose", "up", "-d", "--remove-orphans")}},
+			warn: true,
+		},
+		{
+			name: "project named with -p",
+			watch: Watch{Strategy: StrategyReleases, Trigger: Trigger{Type: TriggerRelease},
+				Run: []Command{compose("docker", "compose", "-p", "shop", "up", "-d")}},
+		},
+		{
+			name: "project named with --project-name=",
+			watch: Watch{Strategy: StrategyReleases, Trigger: Trigger{Type: TriggerRelease},
+				Run: []Command{compose("docker", "compose", "--project-name=shop", "up")}},
+		},
+		{
+			name: "set through the watch environment",
+			watch: Watch{Strategy: StrategyReleases, Trigger: Trigger{Type: TriggerRelease},
+				Env: map[string]string{"COMPOSE_PROJECT_NAME": "shop"},
+				Run: []Command{compose("docker", "compose", "up", "-d")}},
+		},
+		{
+			name: "the old docker-compose spelling",
+			watch: Watch{Strategy: StrategyReleases, Trigger: Trigger{Type: TriggerRelease},
+				Run: []Command{compose("docker-compose", "up", "-d")}},
+			warn: true,
+		},
+		{
+			name: "a full path to docker",
+			watch: Watch{Strategy: StrategyReleases, Trigger: Trigger{Type: TriggerRelease},
+				Run: []Command{compose("/usr/bin/docker", "compose", "up", "-d")}},
+			warn: true,
+		},
+		{
+			name: "through a shell",
+			watch: Watch{Strategy: StrategyReleases, Trigger: Trigger{Type: TriggerRelease},
+				Run: []Command{{Shell: "docker compose pull && docker compose up -d"}}},
+			warn: true,
+		},
+		{
+			name: "a shell that names the project",
+			watch: Watch{Strategy: StrategyReleases, Trigger: Trigger{Type: TriggerRelease},
+				Run: []Command{{Shell: "docker compose -p shop up -d"}}},
+		},
+		{
+			name: "in place: the directory is the application's own",
+			watch: Watch{Strategy: StrategyInplace, Trigger: Trigger{Type: TriggerRelease},
+				Run: []Command{compose("docker", "compose", "up", "-d")}},
+		},
+		{
+			name: "not compose at all",
+			watch: Watch{Strategy: StrategyReleases, Trigger: Trigger{Type: TriggerRelease},
+				Run: []Command{compose("systemctl", "restart", "app")}},
+		},
+		{
+			name: "an on_failure command counts too",
+			watch: Watch{Strategy: StrategyReleases, Trigger: Trigger{Type: TriggerRelease},
+				Run:       []Command{compose("true")},
+				OnFailure: []Command{compose("docker", "compose", "down")}},
+			warn: true,
+		},
+		{
+			name: "an image trigger runs no checkout",
+			watch: Watch{Strategy: StrategyReleases, Trigger: Trigger{Type: TriggerImage},
+				Run: []Command{compose("docker", "compose", "up", "-d")}},
+		},
+	}
+
+	for _, c := range cases {
+		got := c.watch.ComposeWithoutProjectName(nil)
+		if c.warn && got == "" {
+			t.Errorf("%s: expected a warning", c.name)
+		}
+		if !c.warn && got != "" {
+			t.Errorf("%s: unexpected warning about %q", c.name, got)
+		}
+	}
+
+	// The defaults block covers every watch at once.
+	risky := Watch{Strategy: StrategyReleases, Trigger: Trigger{Type: TriggerRelease},
+		Run: []Command{compose("docker", "compose", "up", "-d")}}
+	if risky.ComposeWithoutProjectName(map[string]string{"COMPOSE_PROJECT_NAME": "x"}) != "" {
+		t.Error("COMPOSE_PROJECT_NAME in defaults.env must silence the warning")
+	}
+}

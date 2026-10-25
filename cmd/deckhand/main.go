@@ -227,7 +227,7 @@ func cmdCheck(args []string) error {
 		for _, c := range w.Run {
 			fmt.Printf("    run:        %s\n", c.String())
 		}
-		for _, warn := range warnings(w) {
+		for _, warn := range warnings(w, cfg.Defaults.Env) {
 			fmt.Printf("    warning:    %s\n", warn)
 		}
 	}
@@ -280,7 +280,7 @@ func hostOf(raw string) string {
 }
 
 // warnings surfaces configurations that are legal but worth a second look.
-func warnings(w *config.Watch) []string {
+func warnings(w *config.Watch, defaultEnv map[string]string) []string {
 	var out []string
 	if w.Trigger.Type == config.TriggerImage {
 		out = append(out, "builds nothing: the image is expected to be built elsewhere "+
@@ -302,6 +302,12 @@ func warnings(w *config.Watch) []string {
 	}
 	if w.Health == nil {
 		out = append(out, "no health check configured; a broken deployment will not be detected or rolled back")
+	}
+	if cmd := w.ComposeWithoutProjectName(defaultEnv); cmd != "" {
+		out = append(out, fmt.Sprintf("%q takes its Compose project name from the working "+
+			"directory, which is \"current\" for every watch. Two compose watches on one host "+
+			"then share networks and containers, and --remove-orphans removes the other one's. "+
+			"Add env: { COMPOSE_PROJECT_NAME: %s } or pass -p %s.", cmd, w.Name, w.Name))
 	}
 	return out
 }

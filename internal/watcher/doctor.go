@@ -263,6 +263,12 @@ func (e *Engine) checkWatch(ctx context.Context, r *report, w *config.Watch) {
 		}
 	}
 
+	if cmd := w.ComposeWithoutProjectName(e.cfg.Defaults.Env); cmd != "" {
+		r.warn("%q takes its Compose project name from the working directory, which is\n"+
+			"      \"current\" for every watch - two compose watches on one host then share\n"+
+			"      networks and containers. Add env: { COMPOSE_PROJECT_NAME: %s }.", cmd, w.Name)
+	}
+
 	e.checkPath(r, w)
 
 	if w.Health != nil && w.Health.HTTP != "" {

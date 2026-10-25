@@ -470,6 +470,79 @@ func (c Command) String() string {
 	return strings.Join(c.Cmd, " ")
 }
 
+// ComposeWithoutProjectName reports a Docker Compose command that will take its
+// project name from the working directory, and that directory is "current".
+//
+// With the releases strategy every watch runs its commands in <path>/current,
+// so Compose derives the same project name - "current" - for all of them.
+// Two compose-based watches on one host then share networks, volumes and
+// container names, and "--remove-orphans" on one removes the other one's
+// containers. It is a quiet, destructive collision that looks like the other
+// app crashing.
+//
+// Deckhand does not set COMPOSE_PROJECT_NAME by itself. It could, but on an
+// existing install that would silently rename the project on upgrade: compose
+// would create a second set of containers and leave the first running. So this
+// reports the risk and the operator decides.
+//
+// Returns the offending command, or an empty string when there is nothing to
+// warn about.
+func (w *Watch) ComposeWithoutProjectName(defaultEnv map[string]string) string {
+	// Only the releases strategy puts the commands in a shared "current"
+	// directory; in place, the directory is the application's own.
+	if !w.NeedsCheckout() || w.Strategy != StrategyReleases {
+		return ""
+	}
+	if _, ok := w.Env["COMPOSE_PROJECT_NAME"]; ok {
+		return ""
+	}
+	if _, ok := defaultEnv["COMPOSE_PROJECT_NAME"]; ok {
+		return ""
+	}
+
+	for _, commands := range [][]Command{w.Run, w.OnFailure} {
+		for _, c := range commands {
+			if isCompose(c) && !namesComposeProject(c) {
+				return c.String()
+			}
+		}
+	}
+	return ""
+}
+
+// isCompose recognises the three spellings in the wild.
+func isCompose(c Command) bool {
+	if c.Shell != "" {
+		return strings.Contains(c.Shell, "docker compose") ||
+			strings.Contains(c.Shell, "docker-compose") ||
+			strings.Contains(c.Shell, "podman-compose")
+	}
+	if len(c.Cmd) == 0 {
+		return false
+	}
+	program := filepath.Base(c.Cmd[0])
+	if program == "docker-compose" || program == "podman-compose" {
+		return true
+	}
+	return program == "docker" && len(c.Cmd) > 1 && c.Cmd[1] == "compose"
+}
+
+// namesComposeProject reports whether the command picks the project itself.
+func namesComposeProject(c Command) bool {
+	if c.Shell != "" {
+		return strings.Contains(c.Shell, "-p ") ||
+			strings.Contains(c.Shell, "--project-name") ||
+			strings.Contains(c.Shell, "COMPOSE_PROJECT_NAME")
+	}
+	for _, arg := range c.Cmd {
+		if arg == "-p" || arg == "--project-name" ||
+			strings.HasPrefix(arg, "--project-name=") {
+			return true
+		}
+	}
+	return false
+}
+
 // Load reads, validates and normalises a config file.
 func Load(path string) (*Config, error) {
 	abs, err := filepath.Abs(path)

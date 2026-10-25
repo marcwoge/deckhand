@@ -328,10 +328,28 @@ disk. Use it when something outside Deckhand insists on a fixed path.
 ### What to run
 
 ```yaml
+env:
+  COMPOSE_PROJECT_NAME: shop      # see the warning below
 run:
   - ["docker", "compose", "pull"]
   - ["docker", "compose", "up", "-d"]
 ```
+
+> **If you use Docker Compose, set `COMPOSE_PROJECT_NAME`.** With the default
+> `releases` strategy your commands run in `<path>/current`, and Compose takes
+> its project name from the working directory — so it is **`current` for every
+> watch on the machine**. Two compose-based watches then share networks,
+> volumes and container names, and `docker compose up --remove-orphans` on one
+> of them removes the other one's containers. Name the project after the watch
+> (`env: { COMPOSE_PROJECT_NAME: shop }`, or pass `-p shop`), and
+> `deckhand check` will stop warning about it.
+>
+> For a multi-file setup, `COMPOSE_FILE: compose.yaml:compose.prod.yaml` in the
+> same `env:` block works and keeps the `run:` commands short.
+>
+> Deckhand does not set the project name for you on purpose: on a host that is
+> already deploying this way, changing it would make Compose create a second set
+> of containers and leave the first running.
 
 Each command is an argv list: the first element is the program, the rest are
 arguments passed verbatim. There is no shell, so quoting, `&&`, `|` and `$VAR`

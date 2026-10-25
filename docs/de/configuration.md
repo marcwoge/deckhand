@@ -333,10 +333,29 @@ einem festen Pfad besteht.
 ### Was ausgeführt wird
 
 ```yaml
+env:
+  COMPOSE_PROJECT_NAME: shop      # siehe Warnung unten
 run:
   - ["docker", "compose", "pull"]
   - ["docker", "compose", "up", "-d"]
 ```
+
+> **Wer Docker Compose nutzt, muss `COMPOSE_PROJECT_NAME` setzen.** Mit der
+> Standard-Strategie `releases` laufen die Befehle in `<path>/current`, und
+> Compose nimmt den Projektnamen aus dem Arbeitsverzeichnis — er ist also
+> **`current` für jeden Watch auf der Maschine**. Zwei Compose-Watches teilen
+> dann Netzwerke, Volumes und Container-Namen, und `docker compose up
+> --remove-orphans` beim einen entfernt die Container des anderen. Benenne das
+> Projekt nach dem Watch (`env: { COMPOSE_PROJECT_NAME: shop }` oder `-p shop`),
+> dann hört auch `deckhand check` auf zu warnen.
+>
+> Bei mehreren Compose-Dateien funktioniert
+> `COMPOSE_FILE: compose.yaml:compose.prod.yaml` im selben `env:`-Block und hält
+> die `run:`-Befehle kurz.
+>
+> Deckhand setzt den Projektnamen absichtlich nicht selbst: auf einem Host, der
+> schon so deployt, würde Compose dadurch einen zweiten Satz Container anlegen
+> und den ersten laufen lassen.
 
 Jeder Befehl ist eine Argumentliste: Das erste Element ist das Programm, der
 Rest sind Argumente, die unverändert übergeben werden. Es gibt keine Shell, also

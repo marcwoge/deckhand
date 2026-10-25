@@ -90,6 +90,12 @@ watch:
     shared:                 # survives every deployment
       - .env
       - data/
+    env:
+      # Commands run in <path>/current, so Compose would name every project
+      # "current" and two compose watches on one host would share networks and
+      # containers. Name it after the watch.
+      COMPOSE_PROJECT_NAME: shop
+      # COMPOSE_FILE: compose.yaml:compose.prod.yaml   # for a multi-file setup
     run:
       - ["docker", "compose", "pull"]
       - ["docker", "compose", "up", "-d", "--remove-orphans"]
@@ -130,6 +136,8 @@ watch:
   #     image: ghcr.io/your-name/shop
   #     tag: latest
   #   path: /srv/shop            # a directory you maintain, holding compose.yaml
+  #   env:
+  #     COMPOSE_PROJECT_NAME: shop
   #   run:
   #     - ["docker", "compose", "pull"]
   #     - ["docker", "compose", "up", "-d"]
