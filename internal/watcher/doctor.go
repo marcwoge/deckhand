@@ -120,7 +120,13 @@ func (e *Engine) checkGitHub(ctx context.Context, r *report) {
 	}
 	client := e.client
 	if !e.Authenticated() {
-		if isPublicGitHub(e.cfg.GitHub.API) {
+		if name := e.cfg.GitHub.TokenSpec().Unset(); name != "" {
+			// The operator said where the token comes from, so the useful
+			// message names the variable rather than the absence.
+			r.warn("github.token_env names %s, which is not set in this environment.\n"+
+				"      Private repositories will fail. If the service is meant to read it from a\n"+
+				"      file of variables, install with: deckhand service install --env-file FILE", name)
+		} else if isPublicGitHub(e.cfg.GitHub.API) {
 			r.warn("no token configured: public repositories only, 60 requests/hour per IP")
 		} else {
 			r.warn("no token configured: only repositories this server serves anonymously")
@@ -171,6 +177,10 @@ func (e *Engine) checkNotifications(ctx context.Context, r *report) {
 		r.warn("no notification channel configured; failures would only appear in the log")
 	}
 	for _, ch := range e.cfg.Notify.Channels {
+		if name := ch.Spec().Unset(); name != "" {
+			r.warn("%s: token_env names %s, which is not set in this environment",
+				ch.Type, name)
+		}
 		token, err := secret.Resolve(ctx, ch.Spec())
 		if err != nil {
 			r.fail("%s: %v", ch.Type, err)

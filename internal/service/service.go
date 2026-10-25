@@ -21,6 +21,10 @@ type Params struct {
 	User       string // service account (unix only); empty means the current user
 	StateDir   string
 	SystemWide bool // install for all users (needs root/administrator)
+	// EnvFile is written into the unit as EnvironmentFile, which is how a
+	// token reaches the service without living in the configuration file.
+	// Empty means no such line.
+	EnvFile string
 	// CredentialFiles are the credential files the configuration reads, as
 	// name -> path. They are only used to write the systemd-creds hint, which
 	// is how a credential can be encrypted at rest without Deckhand holding a
@@ -32,6 +36,13 @@ type Params struct {
 func Install(p Params, out io.Writer) error {
 	if err := p.validate(); err != nil {
 		return err
+	}
+	if p.EnvFile != "" && runtime.GOOS != "linux" {
+		// Only systemd reads a file of variables. Say so instead of accepting
+		// the flag and quietly doing nothing with it.
+		fmt.Fprintf(out, "note: --env-file is systemd-only; on %s put the variables in\n"+
+			"  the service definition, or use token_file in the configuration instead\n",
+			runtime.GOOS)
 	}
 	switch runtime.GOOS {
 	case "linux":
@@ -82,6 +93,23 @@ func (p *Params) validate() error {
 	if _, err := os.Stat(p.Config); err != nil {
 		return fmt.Errorf("config %s: %w", p.Config, err)
 	}
+	if p.EnvFile != "" {
+		abs, err := filepath.Abs(p.EnvFile)
+		if err != nil {
+			return err
+		}
+		p.EnvFile = abs
+		// Refused rather than written as a tolerant "EnvironmentFile=-": a unit
+		// pointing at a file that is not there is the silent-missing-token
+		// failure this option exists to prevent.
+		if _, err := os.Stat(p.EnvFile); err != nil {
+			return fmt.Errorf("env file %s: %w\n"+
+				"Create it first, with one VARIABLE=value per line:\n"+
+				"  sudo install -m 600 /dev/null %s\n"+
+				"  sudo sh -c 'echo DECKHAND_GITHUB_TOKEN=github_pat_... >> %s'",
+				p.EnvFile, err, p.EnvFile, p.EnvFile)
+		}
+	}
 	return nil
 }
 
@@ -109,6 +137,7 @@ ProtectControlGroups=yes
 RestrictSUIDSGID=yes
 # A crash dump of a process holding deployment tokens would write them to disk.
 LimitCORE=0
+{{ENVFILE}}
 {{STATE}}
 {{CREDENTIALS}}
 
@@ -124,6 +153,7 @@ func installSystemd(p Params, out io.Writer) error {
 		userLine = "User=" + p.User
 	}
 	unit = strings.ReplaceAll(unit, "{{USER}}", userLine)
+	unit = strings.ReplaceAll(unit, "{{ENVFILE}}", envFileLine(p.EnvFile))
 	stateLine := ""
 	if p.StateDir != "" {
 		stateLine = "Environment=DECKHAND_STATE_DIR=" + p.StateDir
@@ -133,6 +163,16 @@ func installSystemd(p Params, out io.Writer) error {
 	}
 	unit = strings.ReplaceAll(unit, "{{STATE}}", stateLine)
 	unit = strings.ReplaceAll(unit, "{{CREDENTIALS}}", credentialSection(p.CredentialFiles))
+
+	if p.EnvFile != "" {
+		if info, err := os.Stat(p.EnvFile); err == nil && info.Mode().Perm()&0o007 != 0 {
+			// It holds a token, and the service only needs to read it as its
+			// own user or group.
+			fmt.Fprintf(out, "warning: %s is readable by everyone (mode %04o); run:\n"+
+				"  sudo chmod 640 %s\n", p.EnvFile, info.Mode().Perm(), p.EnvFile)
+		}
+		fmt.Fprintf(out, "reading variables from %s\n", p.EnvFile)
+	}
 
 	var path string
 	var systemctl []string
@@ -174,6 +214,19 @@ func installSystemd(p Params, out io.Writer) error {
 	fmt.Fprintf(out, "service enabled and started\n  status: %s status deckhand\n  logs:   journalctl -u deckhand -f\n",
 		strings.Join(systemctl, " "))
 	return nil
+}
+
+// envFileLine is the EnvironmentFile line, or nothing.
+//
+// Deliberately not the "EnvironmentFile=-" form that tolerates a missing file:
+// a token that is quietly absent is the failure this option exists to prevent.
+// If the file goes away, the service should refuse to start and say so, rather
+// than come up and fail on every private repository.
+func envFileLine(path string) string {
+	if path == "" {
+		return ""
+	}
+	return "EnvironmentFile=" + path
 }
 
 // credentialSection writes commented systemd-creds lines for the credential

@@ -108,3 +108,58 @@ func TestCredentialSectionOffersSystemdCreds(t *testing.T) {
 		}
 	}
 }
+
+// The unit used to be written without EnvironmentFile, with the documentation
+// saying to add it afterwards - easy to miss, and then the service starts with
+// "no GitHub token configured" and private repositories fail quietly (#21).
+func TestEnvFileLine(t *testing.T) {
+	if got := envFileLine(""); got != "" {
+		t.Errorf("no env file must produce no line, got %q", got)
+	}
+	got := envFileLine("/etc/deckhand/env")
+	if got != "EnvironmentFile=/etc/deckhand/env" {
+		t.Errorf("line = %q", got)
+	}
+	// The tolerant form would turn a missing file back into a silently
+	// token-less service.
+	if strings.Contains(got, "=-") {
+		t.Errorf("line = %q, want a strict EnvironmentFile", got)
+	}
+	if !strings.Contains(systemdUnit, "{{ENVFILE}}") {
+		t.Error("the unit template has no place for the env file")
+	}
+}
+
+// A unit pointing at a file that is not there is the same silent failure in a
+// different costume, so the installer refuses instead of writing it.
+func TestEnvFileMustExist(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, "deckhand.yaml")
+	if err := os.WriteFile(config, []byte("version: 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(dir, "deckhand")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	p := Params{Binary: binary, Config: config, EnvFile: filepath.Join(dir, "nope")}
+	err := p.validate()
+	if err == nil {
+		t.Fatal("an env file that does not exist must be refused")
+	}
+	// The message has to say how to make one; being told the path is wrong is
+	// not the same as being told what to do.
+	if !strings.Contains(err.Error(), "install -m 600") {
+		t.Errorf("error does not say how to create it: %v", err)
+	}
+
+	envFile := filepath.Join(dir, "env")
+	if err := os.WriteFile(envFile, []byte("DECKHAND_GITHUB_TOKEN=x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p.EnvFile = envFile
+	if err := p.validate(); err != nil {
+		t.Errorf("an env file that is there must be accepted: %v", err)
+	}
+}

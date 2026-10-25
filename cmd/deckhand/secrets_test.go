@@ -168,3 +168,34 @@ func captureStdout(t *testing.T, f func()) string {
 	}
 	return string(b)
 }
+
+// An "env" file next to the configuration is picked up on its own, because the
+// unit used to be written without EnvironmentFile and the documented
+// follow-up step is easy to miss (#21).
+func TestDiscoverEnvFile(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{Path: filepath.Join(dir, "deckhand.yaml")}
+
+	if got := discoverEnvFile(cfg); got != "" {
+		t.Errorf("with no env file there is nothing to find, got %q", got)
+	}
+
+	envFile := filepath.Join(dir, "env")
+	if err := os.WriteFile(envFile, []byte("DECKHAND_GITHUB_TOKEN=x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := discoverEnvFile(cfg); got != envFile {
+		t.Errorf("discovered %q, want %q", got, envFile)
+	}
+
+	// A directory called "env" is not a file of variables.
+	if err := os.Remove(envFile); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(envFile, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if got := discoverEnvFile(cfg); got == envFile {
+		t.Error("a directory must not be taken for an env file")
+	}
+}

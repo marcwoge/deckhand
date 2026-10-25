@@ -41,12 +41,36 @@ ProtectControlGroups=yes
 RestrictSUIDSGID=yes
 ```
 
-Lege den Token in eine Umgebungsdatei, nicht in die Unit:
+Lege den Token in eine Umgebungsdatei, nicht in die Unit — und schreibe diese
+Datei **bevor** du den Dienst installierst:
 
 ```bash
-sudo install -m 600 -o deckhand /dev/null /etc/deckhand/env
+sudo install -m 640 -o root -g deckhand /dev/null /etc/deckhand/env
 echo 'DECKHAND_GITHUB_TOKEN=github_pat_...' | sudo tee /etc/deckhand/env
-sudo systemctl edit deckhand    # ergänze: [Service] / EnvironmentFile=/etc/deckhand/env
+sudo deckhand service install --system --user deckhand
+```
+
+Der Installer findet eine `env`-Datei neben der Konfiguration sowie
+`/etc/deckhand/env` und schreibt `EnvironmentFile=` selbst in die Unit. Mit
+`--env-file /pfad/zur/datei` gibst du eine andere an. Es ist die strikte Form,
+nicht `EnvironmentFile=-`: verschwindet die Datei später, verweigert der Dienst
+den Start und sagt das — statt ohne Token hochzukommen und an jedem privaten
+Repository zu scheitern.
+
+Wer den Dienst zuerst installiert und die Datei danach anlegt, ruft den
+Installer einfach erneut auf — oder ergänzt die Zeile per
+`sudo systemctl edit deckhand`. Eine Unit ohne sie startet mit der Warnung
+`no GitHub token configured` im Log, und die übersieht man leicht, bis ein
+privates Repository scheitert.
+
+`deckhand check` und `deckhand doctor` nennen die Variable, wenn sie
+konfiguriert aber nicht gesetzt ist, statt nur „kein Token" zu melden. Rufe sie
+unter dem Konto auf, unter dem der Dienst läuft — was der Dienst aus seiner
+`EnvironmentFile` liest, steht nicht in deiner Shell:
+
+```bash
+sudo -u deckhand DECKHAND_GITHUB_TOKEN="$(sudo sed -n 's/^DECKHAND_GITHUB_TOKEN=//p' /etc/deckhand/env)" \
+  deckhand doctor --config /etc/deckhand/deckhand.yaml
 ```
 
 Bei einer **Benutzerinstallation** enden die Deployments, sobald sich der

@@ -40,12 +40,35 @@ ProtectControlGroups=yes
 RestrictSUIDSGID=yes
 ```
 
-Put the token in an environment file rather than the unit:
+Put the token in an environment file rather than the unit, and write that file
+**before** installing the service:
 
 ```bash
-sudo install -m 600 -o deckhand /dev/null /etc/deckhand/env
+sudo install -m 640 -o root -g deckhand /dev/null /etc/deckhand/env
 echo 'DECKHAND_GITHUB_TOKEN=github_pat_...' | sudo tee /etc/deckhand/env
-sudo systemctl edit deckhand    # add: [Service] / EnvironmentFile=/etc/deckhand/env
+sudo deckhand service install --system --user deckhand
+```
+
+The installer picks up an `env` file next to the configuration, and
+`/etc/deckhand/env`, and writes `EnvironmentFile=` into the unit for you. Pass
+`--env-file /path/to/file` to name a different one. It is the strict form, not
+`EnvironmentFile=-`: if that file ever disappears the service refuses to start
+and says so, rather than coming up without a token and failing on every private
+repository.
+
+If you install the service first and add the file afterwards, run the installer
+again — or add the line by hand with `sudo systemctl edit deckhand`. A unit
+without it starts with a `no GitHub token configured` warning in the log, which
+is easy to miss until a private repository fails.
+
+`deckhand check` and `deckhand doctor` name the variable when it is configured
+but missing, instead of only reporting that there is no token. Run them as the
+account the service uses — a variable the service reads from its
+`EnvironmentFile` is not in your shell:
+
+```bash
+sudo -u deckhand DECKHAND_GITHUB_TOKEN="$(sudo sed -n 's/^DECKHAND_GITHUB_TOKEN=//p' /etc/deckhand/env)" \
+  deckhand doctor --config /etc/deckhand/deckhand.yaml
 ```
 
 For a **user install**, deployments stop when the user logs out unless lingering

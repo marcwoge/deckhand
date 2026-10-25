@@ -1046,6 +1046,23 @@ func (s SecretSpec) Resolve() (string, error) {
 	return resolveSecretNamed(s.What, s.Inline, s.Env, s.File)
 }
 
+// Unset names an environment variable that a credential is configured to come
+// from but which is not set here.
+//
+// It exists so that "no token configured" can say which variable is missing.
+// The operator spelled out where the credential comes from; being told only
+// that there isn't one sends them looking in the wrong place - which is how a
+// service ends up running against public repositories without anyone noticing.
+//
+// It returns an empty string when the source is something else: a file reports
+// its own errors, and a command runs where it runs.
+func (s SecretSpec) Unset() string {
+	if s.Env == "" || os.Getenv(s.Env) != "" {
+		return ""
+	}
+	return s.Env
+}
+
 // validate checks the shape of a credential: one source, and a usable command.
 func (s SecretSpec) validate() error {
 	sources := 0

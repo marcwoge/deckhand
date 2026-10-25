@@ -207,6 +207,12 @@ func cmdCheck(args []string) error {
 	fmt.Printf("  state directory: %s\n", eng.StateDir())
 	fmt.Printf("  audit log:       %s\n", eng.AuditPath())
 	fmt.Printf("  github auth:     %s\n", eng.AuthDescription())
+	if name := cfg.GitHub.TokenSpec().Unset(); name != "" {
+		fmt.Printf("    warning:       %s is not set in this environment; private "+
+			"repositories will fail\n", name)
+		fmt.Printf("                   the service can read it from a file: " +
+			"deckhand service install --env-file FILE\n")
+	}
 	printNotifications(cfg)
 	for _, w := range eng.Watches() {
 		fmt.Printf("\n  %s\n", w.Name)
@@ -501,12 +507,14 @@ func cmdService(args []string) error {
 	cfgPath := addConfigFlag(fs)
 	user := fs.String("user", "", "service account to run as (Linux, system-wide installs)")
 	system := fs.Bool("system", false, "install for the whole machine instead of the current user")
+	envFile := fs.String("env-file", "", "file of VARIABLE=value lines the service reads "+
+		"(systemd only; an \"env\" file next to the config is picked up automatically)")
 	pos, err := parseFlags(fs, args)
 	if err != nil {
 		return err
 	}
 	if len(pos) != 1 {
-		return errors.New("usage: deckhand service install|uninstall [--system] [--user NAME]")
+		return errors.New("usage: deckhand service install|uninstall [--system] [--user NAME] [--env-file FILE]")
 	}
 	action := pos[0]
 	cfg, err := config.Load(*cfgPath)
@@ -514,7 +522,11 @@ func cmdService(args []string) error {
 		return err
 	}
 	p := service.Params{Config: cfg.Path, User: *user, SystemWide: *system,
-		StateDir: cfg.Defaults.StateDir, CredentialFiles: credentialFiles(cfg)}
+		StateDir: cfg.Defaults.StateDir, CredentialFiles: credentialFiles(cfg),
+		EnvFile: *envFile}
+	if p.EnvFile == "" {
+		p.EnvFile = discoverEnvFile(cfg)
+	}
 	switch action {
 	case "install":
 		return service.Install(p, os.Stdout)
@@ -523,6 +535,26 @@ func cmdService(args []string) error {
 	default:
 		return fmt.Errorf("unknown service action %q", action)
 	}
+}
+
+// discoverEnvFile finds a file of variables the service should read.
+//
+// The unit used to be written without EnvironmentFile, with the documentation
+// saying to add it afterwards - which is easy to miss, and then the service
+// starts with "no GitHub token configured" and private repositories fail
+// quietly. So an "env" file next to the configuration is picked up on its own,
+// and only when it is actually there.
+func discoverEnvFile(cfg *config.Config) string {
+	candidates := []string{filepath.Join(filepath.Dir(cfg.Path), "env")}
+	if runtime.GOOS == "linux" {
+		candidates = append(candidates, "/etc/deckhand/env")
+	}
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func cmdInit(args []string) error {
